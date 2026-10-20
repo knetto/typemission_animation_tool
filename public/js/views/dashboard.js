@@ -171,20 +171,23 @@ export async function mount(root, { tab = 'projects' } = {}) {
     }, icon('upload'), h('span', {}, h('b', {}, 'Eigen geluiden uploaden'), h('span', {}, 'Kies audiobestanden of sleep ze hierheen. Beschikbaar in elk project.')));
 
     fsBrowser = createFreesoundBrowser({
+      isModal: true,
       getCustomSfx: () => custom,
       getFolders: () => sfxStore.getCustomFolders(custom),
       onImported: () => draw(),
     });
 
     const filterBar = h('div', { class: 'sfx-filter-bar', role: 'group', 'aria-label': 'Effecten filteren' });
+    const localSearchRow = h('div', { class: 'lib-head' }, search, newFolderBtn, toggleAllBtn);
     const list = h('div', { class: 'sfx-library-list' });
     body.replaceChildren(
       h('div', { class: 'sfx-library-heading' }, h('h2', {}, 'Geluidenbibliotheek'), h('p', {}, 'Beluister effecten, zoek op Freesound.org en bewaar je favorieten voor je volgende transmissie.')),
+      h('div', { class: 'sfx-controls' },
+        h('div', { class: 'sfx-filter-row' }, filterBar),
+        localSearchRow
+      ),
       fsBrowser.el,
       drop,
-      h('div', { class: 'sfx-controls' },
-        h('div', { class: 'lib-head' }, search, newFolderBtn),
-        h('div', { class: 'sfx-filter-row' }, filterBar, toggleAllBtn)),
       fileIn,
       list
     );
@@ -253,8 +256,20 @@ export async function mount(root, { tab = 'projects' } = {}) {
           class: `sfx-filter-chip fav-chip${sfxFilter === 'fav' ? ' active' : ''}`,
           'aria-pressed': String(sfxFilter === 'fav'),
           onclick: () => { sfxFilter = 'fav'; paint(); }
-        }, icon('starFilled'), `Favorieten (${totalFavCount})`)
+        }, icon('starFilled'), `Favorieten (${totalFavCount})`),
+        h('button', {
+          class: `sfx-filter-chip fs-chip${sfxFilter === 'freesound' ? ' active' : ''}`,
+          'aria-pressed': String(sfxFilter === 'freesound'),
+          onclick: () => { sfxFilter = 'freesound'; paint(); }
+        }, icon('globe'), 'Freesound')
       );
+
+      const isFs = sfxFilter === 'freesound';
+      fsBrowser.el.hidden = !isFs;
+      localSearchRow.hidden = isFs;
+      drop.hidden = isFs;
+      list.hidden = isFs;
+      if (isFs) return;
 
       const buildSection = (key, title, iconName, count, isFavGroup, items, isCustom) => {
         return folders.folder({ key, title, iconName, count, isFavGroup, bodyClass: 'sfx-grid',

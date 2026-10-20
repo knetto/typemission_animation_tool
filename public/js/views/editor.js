@@ -909,8 +909,10 @@ export async function mount(root, { id }) {
       };
 
       const newFolderBtn = h('button', {
-        class: 'btn btn-sm btn-ghost',
+        class: 'btn btn-sm btn-ghost btn-icon',
+        type: 'button',
         title: 'Nieuwe map maken',
+        'aria-label': 'Nieuwe map maken',
         id: 'sfx-new-folder-btn',
         onclick: async () => {
           const n = await modal({
@@ -929,24 +931,47 @@ export async function mount(root, { id }) {
             paintList();
           }
         }
-      }, icon('folderPlus'), 'Nieuwe map');
+      }, icon('folderPlus'));
 
       const toggleCollapseBtn = h('button', {
-        class: 'btn btn-sm btn-ghost',
+        class: 'btn btn-sm btn-ghost btn-icon',
         id: 'sfx-collapse-all-btn',
         type: 'button'
       });
       const folders = createSfxFolders(toggleCollapseBtn);
 
       const uploadBtn = h('button', {
-        class: 'btn btn-sm',
-        title: 'Eigen effect uploaden (wordt bewaard)',
+        class: 'btn btn-sm btn-ghost btn-icon',
+        type: 'button',
+        title: 'Eigen effect uploaden',
+        'aria-label': 'Eigen effect uploaden',
         id: 'sfx-upload-btn',
         onclick: () => {
           uploadTargetFolder = 'Eigen';
           sfxFileIn.click();
         }
-      }, icon('upload'), 'Uploaden');
+      }, icon('upload'));
+
+      const fsSearchBtn = h('button', {
+        class: 'btn btn-sm btn-primary btn-icon',
+        type: 'submit',
+        title: 'Zoeken op Freesound',
+        'aria-label': 'Zoeken op Freesound',
+      }, icon('search'));
+
+      const fsApiBtn = h('button', {
+        class: 'btn btn-sm btn-ghost btn-icon',
+        type: 'button',
+        title: 'Freesound API Key & OAuth2 instellingen',
+        'aria-label': 'Freesound API instellingen',
+        onclick: () => openFreesoundConfigModal({
+          onSaved: (nextStatus) => {
+            fsSide.status = nextStatus;
+            if (nextStatus.configured) doSideFreesoundSearch(1);
+            else paintList();
+          }
+        })
+      }, icon('key'));
 
       const switchToFreesound = async () => {
         sfxFilter = 'freesound';
@@ -961,10 +986,20 @@ export async function mount(root, { id }) {
         }
       };
 
-      const toolbar = h('div', { class: 'sfx-toolbar' }, search,
-        h('div', { class: 'sfx-toolbar-actions' }, uploadBtn, newFolderBtn));
+      const toolbarActions = h('div', { class: 'sfx-toolbar-actions' });
+      const toolbar = h('form', {
+        class: 'sfx-search-row',
+        onsubmit: (e) => {
+          e.preventDefault();
+          if (sfxFilter === 'freesound') {
+            if (sfxQuery.trim()) fsSide.activeCat = '';
+            doSideFreesoundSearch(1);
+          } else {
+            paintList();
+          }
+        }
+      }, search, toolbarActions);
       const list = h('div', { class: 'sfx-library-list' });
-      const captionRow = h('div', { class: 'sfx-list-caption' });
 
       const refreshCustomSfx = async () => {
         customSfx = await api.sfx().catch(() => []);
@@ -1315,12 +1350,12 @@ export async function mount(root, { id }) {
           h('button', {
             class: `sfx-filter-chip${sfxFilter === 'all' ? ' active' : ''}`,
             'aria-pressed': String(sfxFilter === 'all'),
-            onclick: () => { sfxFilter = 'all'; paintList(); }
+            onclick: () => { sfxFilter = 'all'; search.placeholder = 'Zoek effect…'; paintList(); }
           }, 'Alles'),
           h('button', {
             class: `sfx-filter-chip fav-chip${sfxFilter === 'fav' ? ' active' : ''}`,
             'aria-pressed': String(sfxFilter === 'fav'),
-            onclick: () => { sfxFilter = 'fav'; paintList(); }
+            onclick: () => { sfxFilter = 'fav'; search.placeholder = 'Zoek favoriet…'; paintList(); }
           }, icon('starFilled'), `Favorieten (${totalFavCount})`),
           h('button', {
             class: `sfx-filter-chip fs-chip${sfxFilter === 'freesound' ? ' active' : ''}`,
@@ -1330,83 +1365,42 @@ export async function mount(root, { id }) {
         );
 
         if (sfxFilter === 'freesound') {
-          captionRow.replaceChildren(
-            h('span', {}, 'Freesound.org'),
-            h('div', { class: 'fs-side-head-btns' },
-              h('button', {
-                class: 'btn btn-ghost btn-sm',
-                type: 'button',
-                title: 'Freesound API Key & OAuth2 instellingen',
-                onclick: () => openFreesoundConfigModal({
-                  onSaved: (nextStatus) => {
-                    fsSide.status = nextStatus;
-                    if (nextStatus.configured) doSideFreesoundSearch(1);
-                    else paintList();
-                  }
-                })
-              }, icon('key'), 'API'),
-              h('button', {
-                class: 'btn btn-ghost btn-sm',
-                type: 'button',
-                title: 'Open groot Freesound overzicht',
-                onclick: () => openFreesoundModal({
-                  getCustomSfx: () => customSfx,
-                  getFolders: () => sfxStore.getCustomFolders(customSfx),
-                  onImported: async () => {
-                    await refreshCustomSfx();
-                    paintList();
-                  }
-                })
-              }, icon('full'))
-            )
-          );
+          toolbarActions.replaceChildren(fsSearchBtn, fsApiBtn);
 
-          const fsSearchIn = h('input', {
-            class: 'input fs-side-search-in',
-            type: 'search',
-            value: sfxQuery,
-            placeholder: 'Zoek op Freesound (bijv. kick, click, whoosh)…',
-            'aria-label': 'Zoek op Freesound',
-            oninput: (e) => {
-              sfxQuery = search.value = e.target.value;
-            }
-          });
-          const fsSearchForm = h('form', {
-            class: 'fs-side-search-form',
-            onsubmit: (e) => {
-              e.preventDefault();
-              sfxQuery = search.value = fsSearchIn.value;
-              if (sfxQuery.trim()) fsSide.activeCat = '';
+          const activeCatValue = !sfxQuery.trim() && fsSide.activeCat
+            ? `cat:${fsSide.activeCat}`
+            : `sort:${fsSide.sort}`;
+
+          const catSortSel = h('select', {
+            class: 'select fs-side-select',
+            'aria-label': 'Categorie of sortering',
+            onchange: (e) => {
+              const val = e.target.value;
+              if (val.startsWith('cat:')) {
+                const catId = val.slice(4);
+                const cat = QUICK_CATEGORIES.find((c) => c.id === catId);
+                fsSide.activeCat = catId;
+                sfxQuery = search.value = '';
+                if (cat?.sort) fsSide.sort = cat.sort;
+              } else if (val.startsWith('sort:')) {
+                fsSide.sort = val.slice(5);
+              }
               doSideFreesoundSearch(1);
             }
           },
-            fsSearchIn,
-            h('button', { class: 'btn btn-primary btn-sm btn-icon', type: 'submit', title: 'Zoeken op Freesound' }, icon('search'))
-          );
-
-          const chipsWrap = h('div', { class: 'fs-side-cats' },
-            ...QUICK_CATEGORIES.map((cat) => h('button', {
-              class: `sfx-filter-chip${fsSide.activeCat === cat.id && !sfxQuery.trim() ? ' active' : ''}`,
-              type: 'button',
-              onclick: () => {
-                fsSide.activeCat = cat.id;
-                sfxQuery = search.value = fsSearchIn.value = '';
-                if (cat.sort) fsSide.sort = cat.sort;
-                doSideFreesoundSearch(1);
-              }
-            }, cat.label))
-          );
-
-          const sortSel = h('select', {
-            class: 'select fs-side-select',
-            'aria-label': 'Sorteren',
-            onchange: (e) => { fsSide.sort = e.target.value; doSideFreesoundSearch(1); }
-          },
-            h('option', { value: 'downloads_desc', selected: fsSide.sort === 'downloads_desc' }, 'Populairste'),
-            h('option', { value: 'score', selected: fsSide.sort === 'score' }, 'Relevantie'),
-            h('option', { value: 'rating_desc', selected: fsSide.sort === 'rating_desc' }, 'Beoordeling'),
-            h('option', { value: 'duration_asc', selected: fsSide.sort === 'duration_asc' }, 'Kortste eerst'),
-            h('option', { value: 'created_desc', selected: fsSide.sort === 'created_desc' }, 'Nieuwste')
+            h('optgroup', { label: 'Categorieën' },
+              ...QUICK_CATEGORIES.map((cat) => h('option', {
+                value: `cat:${cat.id}`,
+                selected: activeCatValue === `cat:${cat.id}`
+              }, cat.label))
+            ),
+            h('optgroup', { label: 'Sortering' },
+              h('option', { value: 'sort:downloads_desc', selected: activeCatValue === 'sort:downloads_desc' }, 'Populairste eerst'),
+              h('option', { value: 'sort:score', selected: activeCatValue === 'sort:score' }, 'Relevantie'),
+              h('option', { value: 'sort:rating_desc', selected: activeCatValue === 'sort:rating_desc' }, 'Hoogst beoordeeld'),
+              h('option', { value: 'sort:duration_asc', selected: activeCatValue === 'sort:duration_asc' }, 'Kortste eerst'),
+              h('option', { value: 'sort:created_desc', selected: activeCatValue === 'sort:created_desc' }, 'Nieuwste')
+            )
           );
 
           const durSel = h('select', {
@@ -1422,9 +1416,7 @@ export async function mount(root, { id }) {
           );
 
           list.append(
-            fsSearchForm,
-            chipsWrap,
-            h('div', { class: 'fs-side-filters' }, sortSel, durSel)
+            h('div', { class: 'fs-side-filters' }, catSortSel, durSel)
           );
 
           if (fsSide.loading) {
@@ -1482,7 +1474,7 @@ export async function mount(root, { id }) {
           return;
         }
 
-        captionRow.replaceChildren(h('span', {}, 'Categorieën'), toggleCollapseBtn);
+        toolbarActions.replaceChildren(uploadBtn, newFolderBtn, toggleCollapseBtn);
 
         let renderedCount = 0;
 
@@ -1633,8 +1625,7 @@ export async function mount(root, { id }) {
       };
 
       const filterBar = h('div', { class: 'sfx-filter-bar', role: 'group', 'aria-label': 'Effecten filteren' });
-      mediaBody.append(h('div', { class: 'sfx-controls' }, toolbar, filterBar, captionRow),
-        h('p', { class: 'sfx-help' }, '▶ beluisteren · ★ favoriet · + op tijdlijn'), sfxFileIn, list);
+      mediaBody.append(h('div', { class: 'sfx-controls' }, filterBar, toolbar), sfxFileIn, list);
       paintList();
     }
   }

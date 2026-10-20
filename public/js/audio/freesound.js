@@ -302,6 +302,17 @@ export function createFreesoundBrowser({ onImported, getCustomSfx, getFolders, s
     placeholder: 'Zoek op Freesound (bijv. sticker, keyboard, click, whoosh, beep)…',
     'aria-label': 'Zoek op Freesound',
   });
+  const catSelect = h('select', {
+    class: 'select fs-select',
+    'aria-label': 'Categorie',
+    onchange: (e) => {
+      const cat = QUICK_CATEGORIES.find((c) => c.id === e.target.value);
+      if (cat) selectQuickCategory(cat);
+    }
+  },
+    ...QUICK_CATEGORIES.map((cat) => h('option', { value: cat.id }, cat.label))
+  );
+
   const sortSelect = h('select', {
     class: 'select fs-select',
     'aria-label': 'Sorteren op',
@@ -338,15 +349,15 @@ export function createFreesoundBrowser({ onImported, getCustomSfx, getFolders, s
     }
   },
     searchIn,
+    catSelect,
     sortSelect,
     maxDurSelect,
     folderSelect,
     h('button', { class: 'btn btn-primary btn-sm fs-search-submit', type: 'submit' }, icon('search'), 'Zoeken')
   );
 
-  const catRow = h('div', { class: 'fs-cat-row' });
   const resultsWrap = h('div', { class: 'fs-results-wrap' });
-  const bodyWrap = h('div', { class: 'fs-panel-body' }, configSlot, searchForm, catRow, resultsWrap);
+  const bodyWrap = h('div', { class: 'fs-panel-body' }, configSlot, searchForm, resultsWrap);
 
   root.append(head, bodyWrap);
 
@@ -362,6 +373,7 @@ export function createFreesoundBrowser({ onImported, getCustomSfx, getFolders, s
 
   function selectQuickCategory(cat) {
     activeCategory = cat.id;
+    catSelect.value = cat.id;
     searchIn.value = cat.q;
     if (cat.sort) sortSelect.value = cat.sort;
     doSearch(1);
@@ -434,15 +446,7 @@ export function createFreesoundBrowser({ onImported, getCustomSfx, getFolders, s
 
   function renderCategories() {
     syncFolderOptions();
-    catRow.replaceChildren(
-      h('div', { class: 'fs-chips' },
-        ...QUICK_CATEGORIES.map((cat) => h('button', {
-          class: `sfx-filter-chip${activeCategory === cat.id ? ' active' : ''}`,
-          type: 'button',
-          onclick: () => selectQuickCategory(cat),
-        }, cat.label))
-      )
-    );
+    if (activeCategory) catSelect.value = activeCategory;
   }
 
   function renderResults() {

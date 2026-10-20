@@ -9,7 +9,11 @@ export function createSfxFolders(bulkButton) {
   function sync() {
     const anyOpen = folders.some((folder) => !folder.body.hidden);
     const label = anyOpen ? 'Alles invouwen' : 'Alles uitvouwen';
-    bulkButton.replaceChildren(icon(anyOpen ? 'collapse' : 'expand'), label);
+    if (bulkButton.classList.contains('btn-icon')) {
+      bulkButton.replaceChildren(icon(anyOpen ? 'collapse' : 'expand'));
+    } else {
+      bulkButton.replaceChildren(icon(anyOpen ? 'collapse' : 'expand'), label);
+    }
     bulkButton.title = label;
     bulkButton.setAttribute('aria-label', label);
     bulkButton.disabled = !folders.length;
