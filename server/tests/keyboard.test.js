@@ -53,8 +53,11 @@ test('All keyboard layouts (NL, US, UK, AZERTY, German QWERTZ) have 5 balanced r
 });
 
 test('extra characters input matches primary and secondary symbols and generates clean slugs', () => {
-  const matchedQwerty = findKeyIdsByInput('qwerty', 'A.,?! ');
-  assert.deepEqual(matchedQwerty, ['a', 'period', 'comma', 'slash', '1', 'space']);
+  const matchedNl = findKeyIdsByInput('qwerty', 'A.,?!@°¨ ');
+  assert.deepEqual(matchedNl, ['a', 'period', 'comma', 'slash', '1', 'at', 'degree', 'diaeresis', 'space']);
+
+  const matchedUs = findKeyIdsByInput('qwerty_us', 'A.,?! ');
+  assert.deepEqual(matchedUs, ['a', 'period', 'comma', 'slash', '1', 'space']);
 
   const matchedQwertz = findKeyIdsByInput('qwertz', 'äöüß');
   assert.deepEqual(matchedQwertz, ['auml', 'ouml', 'uuml', 'eszett']);
