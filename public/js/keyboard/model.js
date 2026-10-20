@@ -97,11 +97,13 @@ export const MASK_MODES = {
 };
 
 // Helper to create a key definition (splits index finger into left 'index' and right 'index_right')
-const k = (id, label, { sub = '', w = 1, finger = 'pinky', hand = 'left', kind = 'letter', homing = false } = {}) => ({
+const k = (id, label, { sub = '', w = 1, wBottom = 0, isoEnter = false, finger = 'pinky', hand = 'left', kind = 'letter', homing = false } = {}) => ({
   id,
   label,
   sub,
   w,
+  wBottom: isoEnter ? (wBottom || 1.25) : 0,
+  isoEnter,
   finger: finger === 'index' && hand === 'right' ? 'index_right' : finger,
   hand,
   kind,
@@ -144,7 +146,7 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('diaeresis', '¨', { sub: '^', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('asterisk', '*', { sub: '|', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('angle', '<', { sub: '>', w: 1.5, finger: 'pinky', hand: 'right', kind: 'symbol' }),
+        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -159,7 +161,7 @@ export const KEYBOARD_LAYOUTS = {
         k('l', 'L', { finger: 'ring', hand: 'right', kind: 'letter' }),
         k('plus', '+', { sub: '±', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('acute', '´', { sub: '`', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 2.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('angle', '<', { sub: '>', finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
         k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -301,7 +303,7 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('lbracket', '[', { sub: '{', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('rbracket', ']', { sub: '}', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('hash', '#', { sub: '~', w: 1.5, finger: 'pinky', hand: 'right', kind: 'symbol' }),
+        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -316,7 +318,7 @@ export const KEYBOARD_LAYOUTS = {
         k('l', 'L', { finger: 'ring', hand: 'right', kind: 'letter' }),
         k('semicolon', ';', { sub: ':', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('quote', "'", { sub: '@', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 2.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('hash', '#', { sub: '~', finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
         k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -380,7 +382,7 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('circumflex', '^', { sub: '¨', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('dollar', '$', { sub: '*', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('mu', 'µ', { sub: '£', w: 1.5, finger: 'pinky', hand: 'right', kind: 'symbol' }),
+        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -395,7 +397,7 @@ export const KEYBOARD_LAYOUTS = {
         k('l', 'L', { finger: 'ring', hand: 'right', kind: 'letter' }),
         k('m', 'M', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('ugrave', 'ù', { sub: '%', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 2.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('mu', 'µ', { sub: '£', finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
         k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -459,7 +461,7 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('uuml', 'Ü', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('plus', '+', { sub: '*', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('hash', '#', { sub: "'", w: 1.5, finger: 'pinky', hand: 'right', kind: 'symbol' }),
+        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -474,7 +476,7 @@ export const KEYBOARD_LAYOUTS = {
         k('l', 'L', { finger: 'ring', hand: 'right', kind: 'letter' }),
         k('ouml', 'Ö', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('auml', 'Ä', { finger: 'pinky', hand: 'right', kind: 'letter' }),
-        k('enter', 'Enter ↵', { w: 2.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('hash', '#', { sub: "'", finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
         k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),

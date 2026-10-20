@@ -27,7 +27,8 @@ test('All keyboard layouts (NL, US, UK, AZERTY, German QWERTZ) have 5 balanced r
     assert.ok(layout, `layout ${layoutId} exists`);
     assert.equal(layout.rows.length, 5, `${layoutId} has 5 rows`);
     for (const [rIdx, row] of layout.rows.entries()) {
-      const sumW = row.reduce((acc, k) => acc + k.w, 0);
+      const prevRowIso = rIdx > 0 ? layout.rows[rIdx - 1].find((k) => k.isoEnter) : null;
+      const sumW = row.reduce((acc, k) => acc + k.w, 0) + (prevRowIso ? prevRowIso.wBottom || 1.25 : 0);
       assert.ok(Math.abs(sumW - 15) < 1e-6, `${layoutId} row ${rIdx} sums to 15u (got ${sumW})`);
       for (const k of row) {
         assert.ok(validFingers.has(k.finger), `${layoutId} key ${k.id} has valid finger ${k.finger}`);

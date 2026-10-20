@@ -673,8 +673,9 @@ export async function mount(root, { id, project, exportingView = false }) {
     kbSelectionSummary.textContent = `${opts.selectedKeys.length} van ${flat.length} toetsen geselecteerd voor export`;
 
     kbGridWrap.replaceChildren(
-      ...layoutObj.rows.map((row) =>
-        h('div', { class: 'kb-row' },
+      ...layoutObj.rows.map((row, rIdx) => {
+        const prevRowIso = rIdx > 0 ? layoutObj.rows[rIdx - 1]?.find((k) => k.isoEnter) : null;
+        return h('div', { class: 'kb-row' },
           ...row.map((key) => {
             const isSelected = selSet.has(key.id);
             const isPreview = opts.previewKey === key.id;
@@ -682,7 +683,7 @@ export async function mount(root, { id, project, exportingView = false }) {
             const fInfo = FINGERS.find((f) => f.id === key.finger) || FINGERS[0];
             return h('button', {
               type: 'button',
-              class: `kb-key${isSelected ? ' selected' : ''}${isPreview ? ' previewing' : ''}${key.homing ? ' homing' : ''}`,
+              class: `kb-key${isSelected ? ' selected' : ''}${isPreview ? ' previewing' : ''}${key.homing ? ' homing' : ''}${key.isoEnter ? ' iso-enter' : ''}`,
               'data-key-id': key.id,
               'aria-pressed': String(isSelected),
               title: `${key.label}${key.sub ? ' / ' + key.sub : ''} (${fInfo.name}) — Klik om te selecteren · Rechtermuisklik voor afspelen & opties`,
@@ -690,12 +691,26 @@ export async function mount(root, { id, project, exportingView = false }) {
               onclick: () => toggleKeySelection(key.id),
               oncontextmenu: (e) => openKeyContextMenu(e, key.id),
             },
+            key.isoEnter
+              ? h('span', {
+                  class: 'kb-iso-shape',
+                  'aria-hidden': 'true',
+                  html: `<svg viewBox="0 0 60 81" preserveAspectRatio="none"><path d="M8,1 H52 A7,7 0 0 1 59,8 V73 A7,7 0 0 1 52,80 H18.5 A7,7 0 0 1 11.5,73 V42 A4,4 0 0 0 7.5,38 H7 A6,6 0 0 1 1,32 V8 A7,7 0 0 1 8,1 Z"/></svg>`,
+                })
+              : null,
             key.sub ? h('small', { class: 'kb-key-sub' }, key.sub) : null,
             h('span', { class: 'kb-key-main' }, key.label),
             isSelected ? h('span', { class: 'kb-key-check', 'aria-hidden': 'true' }, '✓') : null);
-          })
-        )
-      )
+          }),
+          prevRowIso
+            ? h('div', {
+                class: 'kb-iso-spacer',
+                style: { '--kw': prevRowIso.wBottom || 1.25 },
+                'aria-hidden': 'true',
+              })
+            : null
+        );
+      })
     );
   }
 

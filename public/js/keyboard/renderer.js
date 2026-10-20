@@ -56,6 +56,25 @@ function drawCoverImage(ctx, img, rx, ry, rw, rh) {
   return true;
 }
 
+// Trace either a standard rounded rectangle or a 6-corner stepped L-shaped ISO Enter key
+function traceKeyShape(ctx, x, y, w, h, r, isoStepX = 0, isoStepY = 0) {
+  ctx.beginPath();
+  if (isoStepX <= 0 || isoStepY <= 0) {
+    ctx.roundRect(x, y, w, h, r);
+    return;
+  }
+  const rOuter = Math.min(r, w * 0.25, h * 0.2);
+  const rInner = Math.min(rOuter * 0.75, isoStepX * 0.45, isoStepY * 0.45);
+  ctx.moveTo(x + rOuter, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rOuter);
+  ctx.arcTo(x + w, y + h, x + isoStepX, y + h, rOuter);
+  ctx.arcTo(x + isoStepX, y + h, x + isoStepX, y + isoStepY, rOuter);
+  ctx.arcTo(x + isoStepX, y + isoStepY, x, y + isoStepY, rInner);
+  ctx.arcTo(x, y + isoStepY, x, y, rOuter);
+  ctx.arcTo(x, y, x + w, y, rOuter);
+  ctx.closePath();
+}
+
 // Compute pixel rectangles for all keys in the 1920x1080 stage
 export function computeKeyRects(layoutId) {
   const keys = getFlatKeys(layoutId);
@@ -75,17 +94,22 @@ export function computeKeyRects(layoutId) {
       h: totalH + 76 - gap,
     },
     keys: keys.map((k) => {
+      const isIso = Boolean(k.isoEnter);
       const x = startX + k.unitX * unitW;
       const y = startY + k.rowIndex * rowH;
       const w = k.w * unitW - gap;
-      const h = rowH - gap;
+      const h = isIso ? rowH * 2 - gap : rowH - gap;
+      const isoStepX = isIso ? (k.w - (k.wBottom || 1.25)) * unitW : 0;
+      const isoStepY = isIso ? rowH - gap : 0;
       return {
         ...k,
         x,
         y,
         w,
         h,
-        cx: x + w / 2,
+        isoStepX,
+        isoStepY,
+        cx: x + (isoStepX + w) / 2,
         cy: y + h / 2,
       };
     }),
@@ -120,26 +144,25 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     const y = k.y + pressY;
     const w = k.w;
     const h = k.h;
+    const stepX = k.isoStepX || 0;
+    const stepY = k.isoStepY || 0;
     const sideDepth = Math.max(2, 8 - pressY * 0.75);
 
     g.save();
     // Avoid semi-transparent outer shadow on greenscreen/cutout when board plate is hidden
     if (!(isChromaOrCutout && effectiveBoardMode === 'hidden')) {
       g.fillStyle = 'rgba(0, 0, 0, 0.38)';
-      g.beginPath();
-      g.roundRect(x + 1, k.y + 4, w, h, 14);
+      traceKeyShape(g, x + 1, k.y + 4, w, h, 14, stepX, stepY);
       g.fill();
     }
 
     // Fast GPU-friendly glow halo (avoids expensive CPU shadowBlur on wide keys like spacebar)
     if (highlightAlpha > 0.05 && !(isChromaOrCutout && effectiveBoardMode === 'hidden')) {
       g.fillStyle = rgba(fingerColor, highlightAlpha * 0.18);
-      g.beginPath();
-      g.roundRect(x - 6, y - 6, w + 12, h + 12, 18);
+      traceKeyShape(g, x - 6, y - 6, w + 12, h + 12, 18, stepX, stepY > 0 ? stepY + 12 : 0);
       g.fill();
       g.fillStyle = rgba(fingerColor, highlightAlpha * 0.28);
-      g.beginPath();
-      g.roundRect(x - 3, y - 3, w + 6, h + 6, 15);
+      traceKeyShape(g, x - 3, y - 3, w + 6, h + 6, 15, stepX, stepY > 0 ? stepY + 6 : 0);
       g.fill();
     }
 
@@ -147,8 +170,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     g.fillStyle = highlightAlpha > 0 ? mixHex(theme.keySide, fingerColor, highlightAlpha * 0.45) : theme.keySide;
     g.strokeStyle = highlightAlpha > 0 ? mixHex(theme.keyBorder, fingerColor, highlightAlpha * 0.85) : theme.keyBorder;
     g.lineWidth = highlightAlpha > 0 ? 2.5 : 1.5;
-    g.beginPath();
-    g.roundRect(x, y, w, h, 13);
+    traceKeyShape(g, x, y, w, h, 13, stepX, stepY);
     g.fill();
     g.stroke();
 
@@ -157,20 +179,20 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     const topY = y + 3;
     const topW = w - 10;
     const topH = h - 3 - sideDepth;
+    const topStepX = stepX > 0 ? stepX : 0;
+    const topStepY = stepY > 0 ? stepY - 3 - sideDepth : 0;
     const topGrad = g.createLinearGradient(topX, topY, topX, topY + topH);
     const cTop = highlightAlpha > 0 ? mixHex(theme.keyTop, fingerColor, highlightAlpha * 0.25) : theme.keyTop;
     topGrad.addColorStop(0, mixHex(cTop, '#ffffff', 0.06));
     topGrad.addColorStop(1, cTop);
     g.fillStyle = topGrad;
-    g.beginPath();
-    g.roundRect(topX, topY, topW, topH, 10);
+    traceKeyShape(g, topX, topY, topW, topH, 10, topStepX, topStepY);
     g.fill();
 
     // If image is masked across the keycaps themselves ('keys' mask mode)
     if (maskImageOnKeys && bgImage) {
       g.save();
-      g.beginPath();
-      g.roundRect(topX, topY, topW, topH, 10);
+      traceKeyShape(g, topX, topY, topW, topH, 10, topStepX, topStepY);
       g.clip();
       drawCoverImage(g, bgImage, boardRect.x, boardRect.y - pressY, boardRect.w, boardRect.h);
       if (opts.bgImageDim > 0) {
@@ -184,26 +206,29 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     if (opts.showLaneGuide) {
       const kColor = opts.fingerColors[k.finger] || '#3b82f6';
       g.fillStyle = rgba(kColor, 0.42);
+      const barLeft = topX + topStepX + 10;
+      const barW = Math.max(12, topW - topStepX - 20);
       g.beginPath();
-      g.roundRect(topX + 10, topY + topH - 5, topW - 20, 3, 1.5);
+      g.roundRect(barLeft, topY + topH - 5, barW, 3, 1.5);
       g.fill();
     }
 
     // Keycap typography (visible before sticker covers it)
+    const textCenterX = topX + (topStepX + topW) / 2;
     g.fillStyle = theme.keyText;
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     if (k.sub) {
       g.font = '600 16px "Outfit", sans-serif';
       g.fillStyle = theme.keySub;
-      g.fillText(k.sub, topX + topW / 2, topY + topH * 0.30);
+      g.fillText(k.sub, textCenterX, topY + topH * 0.30);
       g.font = '700 24px "Outfit", sans-serif';
       g.fillStyle = theme.keyText;
-      g.fillText(k.label, topX + topW / 2, topY + topH * 0.67);
+      g.fillText(k.label, textCenterX, topY + topH * 0.67);
     } else {
       const isWord = k.label.length > 2;
       g.font = isWord ? '600 18px "Outfit", sans-serif' : '700 28px "Outfit", sans-serif';
-      g.fillText(k.label, topX + topW / 2, topY + topH * 0.5);
+      g.fillText(k.label, textCenterX, topY + topH * 0.5);
     }
 
     // Tactile homing bump on F and J
@@ -215,7 +240,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     }
 
     g.restore();
-    return { topX, topY, topW, topH };
+    return { topX, topY, topW, topH, topStepX, topStepY };
   }
 
   // Draw a finished or partial sticker on top of a keycap
@@ -226,12 +251,14 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     blank = true,
   } = {}) {
     if (progress <= 0) return;
-    const { topX, topY, topW, topH } = topRect;
+    const { topX, topY, topW, topH, topStepX = 0, topStepY = 0 } = topRect;
     const pad = 2;
     const sx = topX + pad;
     const sy = topY + pad;
     const sw = topW - pad * 2;
     const sh = topH - pad * 2;
+    const sStepX = topStepX > 0 ? topStepX : 0;
+    const sStepY = topStepY > 0 ? Math.max(8, topStepY - pad * 2) : 0;
     const radius = 9;
 
     g.save();
@@ -263,7 +290,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       g.shadowOffsetY = (1 - p) * 12 + 1;
     }
 
-    // For 'peel' mode, clip the adhered portion from top to bottom (with a slight ergonomic angle)
+    // For 'peel' mode, clip the adhered portion from top to bottom
     let peelLineY = sy + sh;
     if (style === 'peel' && progress < 1) {
       const p = easeInOutCubic(progress);
@@ -280,8 +307,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     grad.addColorStop(1, mixHex(color, '#000000', 0.18));
 
     g.fillStyle = grad;
-    g.beginPath();
-    g.roundRect(sx, sy, sw, sh, radius);
+    traceKeyShape(g, sx, sy, sw, sh, radius, sStepX, sStepY);
     g.fill();
     g.shadowBlur = 0;
     g.shadowOffsetY = 0;
@@ -289,18 +315,19 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     // Crisp vinyl sticker inner rim highlight
     g.strokeStyle = 'rgba(255, 255, 255, 0.38)';
     g.lineWidth = 2;
-    g.beginPath();
-    g.roundRect(sx + 1, sy + 1, sw - 2, sh - 2, radius - 1);
+    traceKeyShape(g, sx + 1, sy + 1, sw - 2, sh - 2, radius - 1, sStepX, sStepY > 0 ? sStepY - 2 : 0);
     g.stroke();
 
     // Subtle matte-gloss texture sheen on top half
+    g.save();
+    traceKeyShape(g, sx + 2, sy + 2, sw - 4, sh - 4, radius - 2, sStepX, sStepY > 0 ? sStepY - 4 : 0);
+    g.clip();
     const topSheen = g.createLinearGradient(sx, sy, sx, sy + sh * 0.55);
     topSheen.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
     topSheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
     g.fillStyle = topSheen;
-    g.beginPath();
-    g.roundRect(sx + 2, sy + 2, sw - 4, sh * 0.5, radius - 2);
-    g.fill();
+    g.fillRect(sx, sy, sw, sh * 0.5);
+    g.restore();
 
     // Optional label on sticker (off by default: blind typing uses blank colored stickers!)
     if (!blank) {
@@ -311,7 +338,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       g.textBaseline = 'middle';
       const isWord = k.label.length > 2;
       g.font = isWord ? '700 18px "Outfit", sans-serif' : '800 28px "Outfit", sans-serif';
-      g.fillText(k.label, sx + sw / 2, sy + sh / 2);
+      g.fillText(k.label, sx + (sStepX + sw) / 2, sy + sh / 2);
       g.shadowBlur = 0;
     }
 
@@ -326,8 +353,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     // Diagonal glossy shine sweep after the sticker seals
     if (shineProgress > 0 && shineProgress < 1) {
       g.save();
-      g.beginPath();
-      g.roundRect(sx, sy, sw, sh, radius);
+      traceKeyShape(g, sx, sy, sw, sh, radius, sStepX, sStepY);
       g.clip();
       const bandW = Math.max(36, sw * 0.22);
       const skew = sh * 0.45;
@@ -354,8 +380,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       const p = easeInOutCubic(progress);
       const curlH = Math.max(8, Math.sin(p * Math.PI) * 22);
       g.save();
-      g.beginPath();
-      g.roundRect(sx, sy, sw, sh, radius);
+      traceKeyShape(g, sx, sy, sw, sh, radius, sStepX, sStepY);
       g.clip();
 
       // Shadow cast onto the uncovered keycap just below the peel line
