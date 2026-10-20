@@ -220,7 +220,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     if (k.spyIcon || k.id === 'win') {
-      const logoW = Math.min(topW * 0.56, (topH * 0.68) / LOGO_ASPECT);
+      const logoW = Math.min(topW * 0.42, (topH * 0.50) / LOGO_ASPECT);
       const logoH = logoW * LOGO_ASPECT;
       drawLogo(g, textCenterX - logoW / 2, topY + (topH - logoH) / 2, logoW, theme.keyText);
     } else if (k.sub) {
@@ -340,7 +340,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       g.shadowColor = 'rgba(0, 0, 0, 0.35)';
       g.shadowBlur = 4;
       if (k.spyIcon || k.id === 'win') {
-        const logoW = Math.min(sw * 0.56, (sh * 0.68) / LOGO_ASPECT);
+        const logoW = Math.min(sw * 0.42, (sh * 0.50) / LOGO_ASPECT);
         const logoH = logoW * LOGO_ASPECT;
         drawLogo(g, sx + (sStepX + sw) / 2 - logoW / 2, sy + (sh - logoH) / 2, logoW, '#ffffff');
       } else {
@@ -485,7 +485,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     g.textBaseline = 'middle';
     if (targetKey.spyIcon || targetKey.id === 'win') {
       g.fillText('TOETS:', bx + 68, by + badgeH / 2 + 1);
-      const badgeLogoW = 34;
+      const badgeLogoW = 28;
       const badgeLogoH = badgeLogoW * LOGO_ASPECT;
       drawLogo(g, bx + 162, by + (badgeH - badgeLogoH) / 2, badgeLogoW, theme.keyText);
     } else {
