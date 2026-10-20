@@ -549,7 +549,7 @@ export async function mount(root, { id, project, exportingView = false }) {
     const rowKeys = flat.filter((k) => k.rowIndex === keyObj.rowIndex);
     const allRowSelected = rowKeys.every((k) => selSet.has(k.id));
 
-    const item = (label, subtext, ico, action, { disabled = false, danger = false } = {}) =>
+    const item = (label, icoNode, action, { disabled = false, danger = false } = {}) =>
       h('button', {
         type: 'button',
         class: `kb-ctx-item${danger ? ' danger' : ''}`,
@@ -559,11 +559,8 @@ export async function mount(root, { id, project, exportingView = false }) {
           action();
         },
       },
-      ico ? icon(ico) : null,
-      h('span', { class: 'kb-ctx-text' },
-        h('b', {}, label),
-        subtext ? h('small', {}, subtext) : null
-      ));
+      h('span', { class: 'kb-ctx-ico' }, icoNode),
+      h('span', { class: 'kb-ctx-label' }, label));
 
     const menuEl = h('div', {
       class: 'kb-ctx-menu',
@@ -573,103 +570,67 @@ export async function mount(root, { id, project, exportingView = false }) {
     },
     h('div', { class: 'kb-ctx-head' },
       h('span', { class: 'kb-chip-dot', style: { background: col } }),
-      h('div', { class: 'kb-ctx-title' },
-        h('b', {}, `Toets "${keyObj.label}${keyObj.sub ? ' ' + keyObj.sub : ''}"`),
-        h('small', {}, `${fInfo.name} · Rij ${keyObj.rowIndex + 1}${isSelected ? ` · #${selIdx + 1} in wachtrij` : ' · Niet geselecteerd'}`)
-      )
+      h('b', {}, keyObj.label),
+      h('span', { class: 'kb-ctx-meta' }, fInfo.shortName || fInfo.name)
     ),
     h('div', { class: 'kb-ctx-sep' }),
+    item('Speel voorbeeld', icon('play'), () => setPreviewKey(keyId, true)),
     item(
-      'Speel sticker-animatie',
-      'Bekijk en beluister direct deze toets',
-      'play',
-      () => setPreviewKey(keyId, true)
-    ),
-    item(
-      `Exporteer alleen "${keyObj.label}" (MP4)`,
-      'Render direct 1 losse MP4 voor deze toets',
-      'film',
-      () => {
-        opts.previewKey = keyId;
-        exportScope = 'single';
-        optionChanged({ playPreview: false });
-        startExport();
-      }
-    ),
-    h('div', { class: 'kb-ctx-sep' }),
-    item(
-      isSelected ? 'Deselecteer toets' : 'Selecteer toets voor export',
-      isSelected ? 'Haal sticker weg van deze toets' : 'Voeg deze toets toe aan de export-selectie',
-      isSelected ? 'trash' : 'plus',
+      isSelected ? 'Deselecteer' : 'Selecteer',
+      icon(isSelected ? 'trash' : 'check'),
       () => toggleKeySelection(keyId),
       { danger: isSelected }
     ),
-    item(
-      'Alleen deze toets selecteren',
-      'Wis overige selectie en selecteer enkel deze toets',
-      'check',
-      () => {
-        opts.selectedKeys = [keyId];
-        opts.previewKey = keyId;
-        optionChanged({ playPreview: true });
-      }
-    ),
+    item('Alleen deze toets', '◎', () => {
+      opts.selectedKeys = [keyId];
+      opts.previewKey = keyId;
+      optionChanged({ playPreview: true });
+    }),
     isSelected && opts.selectedKeys.length > 1
       ? h('div', { class: 'kb-ctx-group' },
-          h('div', { class: 'kb-ctx-sep' }),
-          item(
-            'Zet helemaal vooraan (#1)',
-            'Als eerste in de selectie & export-volgorde',
-            null,
-            () => insertSelectedKey(selIdx, 0),
-            { disabled: selIdx === 0 }
-          ),
-          item(
-            `Zet helemaal achteraan (#${opts.selectedKeys.length})`,
-            'Als laatste in de selectie & export-volgorde',
-            null,
-            () => insertSelectedKey(selIdx, opts.selectedKeys.length),
-            { disabled: selIdx === opts.selectedKeys.length - 1 }
-          )
+          item('Zet vooraan (#1)', '↑', () => insertSelectedKey(selIdx, 0), { disabled: selIdx === 0 }),
+          item('Zet achteraan', '↓', () => insertSelectedKey(selIdx, opts.selectedKeys.length), {
+            disabled: selIdx === opts.selectedKeys.length - 1,
+          })
         )
       : null,
     h('div', { class: 'kb-ctx-sep' }),
     item(
-      allLaneSelected ? `Deselecteer hele ${fInfo.name}` : `Selecteer hele ${fInfo.name}`,
-      `${laneKeys.length} toetsen in deze vingerbaan`,
-      null,
+      allLaneSelected ? 'Deselecteer baan' : 'Selecteer baan',
+      '🖐',
       () => selectByFilter((k) => k.finger === keyObj.finger, true)
     ),
     item(
-      allRowSelected ? `Deselecteer hele Rij ${keyObj.rowIndex + 1}` : `Selecteer hele Rij ${keyObj.rowIndex + 1}`,
-      `${rowKeys.length} toetsen op deze rij`,
-      null,
+      allRowSelected ? `Deselecteer rij ${keyObj.rowIndex + 1}` : `Selecteer rij ${keyObj.rowIndex + 1}`,
+      '↔',
       () => selectByFilter((k) => k.rowIndex === keyObj.rowIndex, true)
     ),
-    item(
-      `Kleur van ${fInfo.name} wijzigen…`,
-      `Huidig: ${col.toUpperCase()}`,
-      'edit',
-      () => {
-        const picker = h('input', {
-          type: 'color',
-          value: col,
-          style: { position: 'fixed', left: `${e.clientX}px`, top: `${e.clientY}px`, opacity: '0', pointerEvents: 'none' },
-          oninput: (ev) => {
-            opts.fingerColors[keyObj.finger] = ev.target.value.toLowerCase();
-            persist();
-            paintLeft();
-            paintKeyboardGrid();
-            paintSelectedChips();
-            rebuildScene(true);
-          },
-          onchange: () => picker.remove(),
-          onblur: () => picker.remove(),
-        });
-        document.body.append(picker);
-        picker.click();
-      }
-    ));
+    item('Kleur aanpassen…', icon('edit'), () => {
+      const picker = h('input', {
+        type: 'color',
+        value: col,
+        style: { position: 'fixed', left: `${e.clientX}px`, top: `${e.clientY}px`, opacity: '0', pointerEvents: 'none' },
+        oninput: (ev) => {
+          opts.fingerColors[keyObj.finger] = ev.target.value.toLowerCase();
+          persist();
+          paintLeft();
+          paintKeyboardGrid();
+          paintSelectedChips();
+          rebuildScene(true);
+        },
+        onchange: () => picker.remove(),
+        onblur: () => picker.remove(),
+      });
+      document.body.append(picker);
+      picker.click();
+    }),
+    h('div', { class: 'kb-ctx-sep' }),
+    item(`Exporteer "${keyObj.label}"`, icon('film'), () => {
+      opts.previewKey = keyId;
+      exportScope = 'single';
+      optionChanged({ playPreview: false });
+      startExport();
+    }));
 
     document.body.append(menuEl);
     const rect = menuEl.getBoundingClientRect();
