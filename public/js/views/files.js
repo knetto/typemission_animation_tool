@@ -558,20 +558,6 @@ export async function mount(root, { id, project, exportingView = false }) {
         maxlength: 140,
         oninput: (e) => { emailItem.subject = e.target.value; syncEmail(); }
       })),
-      h('label', { class: 'field' }, 'Classificatie / Badge', h('input', {
-        class: 'input',
-        value: emailItem.badge || '',
-        maxlength: 60,
-        placeholder: 'TOP SECRET // PRIORITY',
-        oninput: (e) => { emailItem.badge = e.target.value; syncEmail(); }
-      })),
-      h('label', { class: 'field' }, 'Bijlage (Attachment — leeglaten om te verbergen)', h('input', {
-        class: 'input',
-        value: emailItem.attachment || '',
-        maxlength: 100,
-        placeholder: 'access_trace_sector4.dat',
-        oninput: (e) => { emailItem.attachment = e.target.value; syncEmail(); }
-      })),
       h('label', { class: 'field' }, 'Berichttekst (Body)', h('textarea', {
         class: 'input file-mono-textarea',
         rows: 7,

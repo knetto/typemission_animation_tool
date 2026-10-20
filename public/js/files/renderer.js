@@ -102,21 +102,17 @@ export async function createFileScene(canvas, images, options = {}) {
       }
     } else if (opts.variant === 'email') {
       rect(x, y, w, 28, colors.bar);
-      text('ENCRYPTED MAIL', x + 10, y + 20, 15, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
-      // Draw crisp envelope icon + scrambled preview lines
-      const ex = x + 18, ey = y + 42, ew = 68, eh = 50;
+      text('E-MAIL', x + 10, y + 20, 15, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
+      // Simple envelope icon in the middle of the tile
+      const ex = x + (w - 84) / 2, ey = y + 40, ew = 84, eh = 56;
       rect(ex, ey, ew, eh, colors.bg, colors.accent, 2);
       g.strokeStyle = colors.accent;
       g.lineWidth = 2;
       g.beginPath();
       g.moveTo(ex, ey);
-      g.lineTo(ex + ew / 2, ey + 26);
+      g.lineTo(ex + ew / 2, ey + 30);
       g.lineTo(ex + ew, ey);
       g.stroke();
-      const tick = Math.floor(t * 6);
-      text(fit(scrambleText('SUBJECT STREAM', tick, 1), w - 108, 14, 'bold'), x + 98, y + 56, 14, colors.warn, 'bold');
-      text(fit(scrambleText('MESSAGE DATA LOCKED', tick, 2), w - 108, 13), x + 98, y + 78, 13, colors.muted);
-      rect(x + 98, y + 86, w - 112, 8, colors.selected);
     }
   };
 
@@ -177,145 +173,46 @@ export async function createFileScene(canvas, images, options = {}) {
   const drawEmailViewer = (item, t, openAt, hold, count) => {
     const elapsed = Math.max(0, t - openAt);
     const isScrambled = item.scrambled !== false;
-    const tick = Math.floor(t * 7);
+    const tick = Math.floor(t * 6);
     const maybeScramble = (str, seed) => (isScrambled ? scrambleText(str, tick, seed) : String(str ?? ''));
 
-    // 1. Left Mail Client Sidebar
-    const sideX = 204, sideY = 224, sideW = 286, sideH = 684;
-    rect(sideX, sideY, sideW, sideH, colors.panel, colors.border);
+    // Simple, clean Email UI: Header box + Body box
+    const boxX = 216, boxW = 1488;
 
-    // Compose button inside sidebar
-    rect(sideX + 16, sideY + 16, sideW - 32, 42, colors.selected, colors.accent, 1.5);
-    text('+ NEW MESSAGE', sideX + 42, sideY + 44, 19, colors.accent, 'bold');
+    // 1. Simple Email Header
+    rect(boxX, 232, boxW, 168, colors.panel, colors.border);
 
-    const mailboxes = [
-      ['> INBOX', '01', true],
-      ['  INTERCEPTED', '03', false],
-      ['  ENCRYPTED', '12', false],
-      ['  QUARANTINE', '01', false],
-      ['  SENT LOGS', '00', false],
-      ['  TRASH', '04', false],
-    ];
-    mailboxes.forEach(([mLabel, mCount, active], idx) => {
-      const my = sideY + 76 + idx * 46;
-      if (active) rect(sideX + 12, my, sideW - 24, 40, colors.selected, colors.accent, 1);
-      text(mLabel, sideX + 22, my + 27, 18, active ? colors.accent : colors.ink, active ? 'bold' : 'normal');
-      text(`[${mCount}]`, sideX + sideW - 64, my + 27, 17, active ? colors.accent : colors.muted, 'bold');
-    });
+    text('From   :', boxX + 28, 274, 22, colors.muted, 'bold');
+    text(fit(maybeScramble(item.from || 'unknown@transmission.local', 11), 980, 23, 'bold'), boxX + 156, 274, 23, colors.ink, 'bold');
 
-    // Security / Cipher status box at bottom of sidebar
-    const secY = sideY + sideH - 188;
-    rect(sideX + 14, secY, sideW - 28, 172, colors.bg, isScrambled ? colors.warn : colors.border, 1.5);
-    text('CIPHER MONITOR', sideX + 28, secY + 30, 17, colors.muted, 'bold');
-    text(isScrambled ? 'STATUS: SCRAMBLED' : 'STATUS: VERIFIED', sideX + 28, secY + 60, 18, isScrambled ? colors.warn : colors.accent, 'bold');
-    text(isScrambled ? 'KEY   : MISSING [!]' : 'KEY   : RSA-4096 OK', sideX + 28, secY + 88, 17, isScrambled ? colors.warn : colors.ink);
-    text('STREAM: ' + (isScrambled ? scrambleText('0x9F 0x4A 0xC1', tick, 77) : 'CLEAN'), sideX + 28, secY + 116, 16, colors.muted);
-    // Progress / corruption bar
-    rect(sideX + 28, secY + 134, sideW - 56, 18, colors.panel, colors.border, 1);
-    rect(sideX + 30, secY + 136, isScrambled ? 68 : sideW - 60, 14, isScrambled ? colors.warn : colors.accent);
+    const dateStr = fit(maybeScramble(item.date || '20 OKT 2026', 19), 340, 20);
+    text(dateStr, boxX + boxW - g.measureText(dateStr).width - 28, 274, 20, colors.muted);
 
-    // 2. Right Reading Pane
-    const mainX = 504, mainY = 224, mainW = 1212;
+    text('To     :', boxX + 28, 318, 22, colors.muted, 'bold');
+    text(fit(maybeScramble(item.to || 'agent@transmission.local', 22), 1260, 22), boxX + 156, 318, 22, colors.ink);
 
-    // Top Mail Action Toolbar
-    rect(mainX, mainY, mainW, 48, colors.panel, colors.border);
-    const actions = ['[ ↩ REPLY ]', '[ ↪ FORWARD ]', '[ 🔓 DECRYPT ]', '[ ⚑ TRACE ]'];
-    actions.forEach((act, idx) => {
-      const ax = mainX + 16 + idx * 176;
-      rect(ax, mainY + 8, 164, 32, colors.bg, colors.border, 1);
-      text(act, ax + 14, mainY + 30, 16, colors.ink, 'bold');
-    });
+    text('Subject:', boxX + 28, 366, 22, colors.muted, 'bold');
+    text(fit(maybeScramble(item.subject || 'Bericht', 33), 1260, 25, 'bold'), boxX + 156, 366, 25, colors.accent, 'bold');
 
-    const badgeText = ` ${item.badge?.trim() || (isScrambled ? 'SCRAMBLED // UNREADABLE' : 'CLASSIFIED')} `;
-    g.font = 'bold 17px "Consolas", "Share Tech Mono", monospace';
-    const bw = Math.min(420, g.measureText(badgeText).width + 24);
-    rect(mainX + mainW - bw - 14, mainY + 8, bw, 32, isScrambled ? colors.warnBg : colors.selected, isScrambled ? colors.warn : colors.accent, 1.5);
-    text(fit(badgeText, bw - 10, 17, 'bold'), mainX + mainW - bw - 6, mainY + 30, 17, isScrambled ? colors.warn : colors.accent, 'bold');
+    // 2. Simple Email Body
+    const bodyY = 418, bodyH = 486;
+    rect(boxX, bodyY, boxW, bodyH, colors.bg, colors.border);
 
-    // 3. Email Metadata Header Box
-    const hdrY = 282, hdrH = 166;
-    rect(mainX, hdrY, mainW, hdrH, colors.panel, colors.border);
-
-    // Sender Avatar / Envelope Seal
-    const avX = mainX + 20, avY = hdrY + 22, avS = 74;
-    rect(avX, avY, avS, avS, isScrambled ? colors.warnBg : colors.selected, isScrambled ? colors.warn : colors.accent, 2);
-    text(isScrambled ? '?!' : '✉', avX + (isScrambled ? 18 : 22), avY + 49, 34, isScrambled ? colors.warn : colors.accent, 'bold');
-
-    // Header rows
-    const metaX = mainX + 114;
-    text('FROM   :', metaX, hdrY + 38, 19, colors.muted, 'bold');
-    text(fit(maybeScramble(item.from || 'unknown@relay', 11), 720, 21, 'bold'), metaX + 110, hdrY + 38, 21, colors.ink, 'bold');
-
-    const dateStr = fit(item.date || '20 OKT 2026', 320, 18);
-    text(dateStr, mainX + mainW - g.measureText(dateStr).width - 20, hdrY + 38, 18, colors.muted);
-
-    text('TO     :', metaX, hdrY + 72, 19, colors.muted, 'bold');
-    text(fit(maybeScramble(item.to || 'operator@archive', 22), 920, 20), metaX + 110, hdrY + 72, 20, colors.ink);
-
-    text('SUBJECT:', metaX, hdrY + 112, 20, isScrambled ? colors.warn : colors.accent, 'bold');
-    text(fit(maybeScramble(item.subject || 'ENCRYPTED MESSAGE', 33), 940, 23, 'bold'), metaX + 110, hdrY + 112, 23, isScrambled ? colors.warn : colors.accent, 'bold');
-
-    // Warning strip inside header bottom
-    rect(mainX + 14, hdrY + 126, mainW - 28, 30, isScrambled ? colors.warnBg : colors.bg, isScrambled ? colors.warn : colors.border, 1);
-    text(
-      isScrambled
-        ? '[!] PAYLOAD SCRAMBLED — CIPHER LOCK ACTIVE (MESSAGE CONTENT UNREADABLE)'
-        : '[OK] AUTHENTICATED TRANSMISSION — TLS/PGP SIGNATURE VERIFIED',
-      mainX + 26,
-      hdrY + 147,
-      16,
-      isScrambled ? colors.warn : colors.accent,
-      'bold'
-    );
-
-    // 4. Message Body Area
-    const hasAttachment = Boolean(item.attachment && item.attachment.trim());
-    const bodyY = 458;
-    const bodyH = hasAttachment ? 388 : 450;
-    rect(mainX, bodyY, mainW, bodyH, colors.bg, colors.border);
-
-    // Left hex offset gutter inside body
-    const gutterW = 92;
-    rect(mainX, bodyY, gutterW, bodyH, colors.panel, colors.border, 1);
-
-    const rawLines = wrapLines(item.body || '', mainW - gutterW - 56, 23, hasAttachment ? 8 : 9);
-    const revealDur = Math.min(0.9, hold * 0.32);
+    const rawLines = wrapLines(item.body || '', boxW - 64, 26, 10);
+    const revealDur = Math.min(0.8, hold * 0.3);
     const totalLines = rawLines.length || 1;
     const visibleLines = revealDur > 0.05
       ? Math.max(1, Math.min(totalLines, Math.ceil((elapsed / revealDur) * totalLines)))
       : totalLines;
 
-    let cursorX = mainX + gutterW + 24;
-    let cursorY = bodyY + 44;
-
     rawLines.slice(0, visibleLines).forEach((line, idx) => {
-      const y = bodyY + 44 + idx * 42;
-      const hexOffset = `00${(idx + 1) * 10}:`;
-      text(hexOffset, mainX + 16, y, 18, colors.muted, 'bold');
-
       if (!line.trim()) return;
+      const y = bodyY + 52 + idx * 44;
       const renderedLine = maybeScramble(line, 100 + idx * 13);
-      text(fit(renderedLine, mainW - gutterW - 44, 23, 'bold'), mainX + gutterW + 24, y, 23, isScrambled ? colors.ink : colors.ink, 'bold');
-      g.font = 'bold 23px "Consolas", "Share Tech Mono", monospace';
-      cursorX = mainX + gutterW + 24 + g.measureText(renderedLine).width + 8;
-      cursorY = y;
+      text(fit(renderedLine, boxW - 64, 26, 'bold'), boxX + 32, y, 26, colors.ink, 'bold');
     });
 
-    if (Math.floor(t * 3) % 2 === 0) {
-      text('█', Math.min(mainX + mainW - 28, cursorX), cursorY, 22, isScrambled ? colors.warn : colors.accent, 'bold');
-    }
-
-    // 5. Attachment Bar
-    if (hasAttachment) {
-      const attY = 856;
-      rect(mainX, attY, mainW, 52, colors.panel, colors.border);
-      const attName = maybeScramble(item.attachment.trim(), 505);
-      rect(mainX + 16, attY + 9, 540, 34, colors.bg, isScrambled ? colors.warn : colors.accent, 1.5);
-      text(fit(`[📎 ${attName}]  ·  148 KB`, 516, 18, 'bold'), mainX + 28, attY + 32, 18, isScrambled ? colors.warn : colors.accent, 'bold');
-      text(isScrambled ? 'ATTACHMENT LOCKED // ENCRYPTED' : 'ATTACHMENT READY', mainX + 580, attY + 32, 17, colors.muted, 'bold');
-    }
-
-    text(`${hold.toFixed(1)}s  ·  EMAIL ${count}/${items.length}  ·  ${isScrambled ? 'CIPHER: SCRAMBLED' : 'DECODED'}`, 204, 936, 19, colors.muted);
+    text(`${hold.toFixed(1)}s  ·  EMAIL ${count}/${items.length}`, boxX, 936, 20, colors.muted);
   };
 
   function pointer(x, y, pressed = false) {
