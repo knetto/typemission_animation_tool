@@ -5,7 +5,7 @@ import { AudioEngine, Player, SR, defaultTimeline, clipDefaults } from '../audio
 import { VOICE_PRESETS } from '../audio/voicefx.js';
 import { BUILTIN_SFX, renderBuiltin } from '../audio/sfxlib.js';
 import { detectVoiced } from '../audio/dsp.js';
-import { previewAudio } from '../preview.js';
+import { previewAudio, createWaveBox } from '../preview.js';
 import { sfxStore, sfxId } from '../audio/sfxstore.js';
 import { createSfxFolders } from '../audio/sfxui.js';
 import {
@@ -749,7 +749,7 @@ export async function mount(root, { id }) {
     rec.timer = setInterval(() => { const el = $('#rec-time'); if (el && rec) el.textContent = fmtTime((Date.now() - rec.t0) / 1000, true); }, 100);
   }
 
-  function mediaItem({ name, sub, badge, cls = '', src, onPlay, onAdd, isFav = false, onFav = null, acts = [] }) {
+  function mediaItem({ name, sub, badge, cls = '', src, onPlay, onAdd, isFav = false, onFav = null, acts = [], wave = null }) {
     const playB = h('button', { class: 'play', title: 'Voorbeluisteren', 'aria-label': `${name} beluisteren` }, icon('play'));
     playB.addEventListener('statechange', (e) => playB.replaceChildren(icon(e.detail ? 'pause' : 'play')));
     playB.onclick = (e) => { e.stopPropagation(); onPlay(playB); };
@@ -764,21 +764,25 @@ export async function mount(root, { id }) {
 
     const normActs = acts.map((b) => b instanceof HTMLElement ? ({ label: b.title, icon: b.title === 'Verwijderen' ? 'trash' : 'edit', danger: b.title === 'Verwijderen', action: () => b.click() }) : b);
 
-    const item = h('div', { class: `media-item ${cls}`, draggable: 'true', title: `${name}\nSleep naar de tijdlijn of dubbelklik om toe te voegen` },
-      playB,
-      h('div', { class: 'info' },
-        h('div', { class: 'name' }, name),
-        h('div', { class: 'sub' }, badge || null, sub)
-      ),
-      h('div', { class: 'acts' },
-        favB,
-        h('button', { class: 'btn btn-ghost btn-icon media-add', title: 'Toevoegen aan tijdlijn', 'aria-label': `${name} toevoegen`, onclick: (e) => { e.stopPropagation(); onAdd(); } }, icon('plus')),
-        normActs.length ? h('button', {
-          class: 'btn btn-ghost btn-icon media-more',
-          title: 'Bestandsopties',
-          'aria-label': `Opties voor ${name}`,
-          onclick: (e) => openContextMenu(e, normActs, name)
-        }, '⋯') : null
+    const waveEl = wave ? createWaveBox({ ...wave, playBtn: playB, compact: true }) : null;
+
+    const item = h('div', { class: `media-item ${cls}${waveEl ? ' has-wave' : ''}`, draggable: 'true', title: `${name}\nSleep naar de tijdlijn of dubbelklik om toe te voegen` },
+      waveEl || playB,
+      h('div', { class: 'media-item-bottom' },
+        h('div', { class: 'info' },
+          h('div', { class: 'name' }, name),
+          h('div', { class: 'sub' }, badge || null, sub)
+        ),
+        h('div', { class: 'acts' },
+          favB,
+          h('button', { class: 'btn btn-ghost btn-icon media-add', title: 'Toevoegen aan tijdlijn', 'aria-label': `${name} toevoegen`, onclick: (e) => { e.stopPropagation(); onAdd(); } }, icon('plus')),
+          normActs.length ? h('button', {
+            class: 'btn btn-ghost btn-icon media-more',
+            title: 'Bestandsopties',
+            'aria-label': `Opties voor ${name}`,
+            onclick: (e) => openContextMenu(e, normActs, name)
+          }, '⋯') : null
+        )
       )
     );
 
@@ -1061,12 +1065,18 @@ export async function mount(root, { id }) {
           name: displayName,
           src: isSaved ? { type: 'sfx', id: localItem.id } : { type: 'freesound', item },
           badge: isSaved ? h('span', { class: 'badge', title: `Opgeslagen in ${localItem.category || 'Freesound'}` }, 'bewaard') : null,
-          sub: subText,
+          sub: [item.username || 'Freesound', lic].filter(Boolean).join(' · '),
           isFav,
           onFav: handleFav,
           onPlay: (b) => previewAudio.playUrl(item.previewUrl, b),
           onAdd: handleAdd,
           acts,
+          wave: {
+            key: `fs:${item.id}`,
+            waveformUrl: item.waveformUrl,
+            audioUrl: item.previewUrl,
+            duration: item.duration || 0,
+          },
         });
       };
 
@@ -1175,12 +1185,17 @@ export async function mount(root, { id }) {
             name: displayName,
             src,
             badge: hasCustomName ? h('span', { class: 'badge', title: `Oorspronkelijk: ${s.name}` }, 'aangepast') : null,
-            sub: s.duration ? `${s.duration.toFixed(1)}s` : 'Eigen audio',
+            sub: s.category || 'Eigen',
             isFav,
             onFav: () => { sfxStore.toggleFavorite(s); paintList(); },
             onPlay: (b) => previewAudio.playUrl(fileUrl.sfx(s), b),
             onAdd: () => addAt(src, displayName),
-            acts
+            acts,
+            wave: {
+              key: `sfx:${s.id}`,
+              audioUrl: fileUrl.sfx(s),
+              duration: s.duration || 0,
+            },
           });
         };
 
@@ -1233,12 +1248,17 @@ export async function mount(root, { id }) {
             name: displayName,
             src,
             badge: hasAlias ? h('span', { class: 'badge', title: `Standaard: ${s.name}` }, 'aangepast') : null,
-            sub: `${s.duration.toFixed(1)}s`,
+            sub: s.category,
             isFav,
             onFav: () => { sfxStore.toggleFavorite(s); paintList(); },
             onPlay: async (b) => previewAudio.playPcm(await renderBuiltin(s.key), b),
             onAdd: () => addAt(src, displayName),
-            acts
+            acts,
+            wave: {
+              key: `builtin:${s.key}`,
+              loadPcm: () => renderBuiltin(s.key),
+              duration: s.duration || 0,
+            },
           });
         };
 
@@ -1340,13 +1360,36 @@ export async function mount(root, { id }) {
             )
           );
 
+          const fsSearchIn = h('input', {
+            class: 'input fs-side-search-in',
+            type: 'search',
+            value: sfxQuery,
+            placeholder: 'Zoek op Freesound (bijv. kick, click, whoosh)…',
+            'aria-label': 'Zoek op Freesound',
+            oninput: (e) => {
+              sfxQuery = search.value = e.target.value;
+            }
+          });
+          const fsSearchForm = h('form', {
+            class: 'fs-side-search-form',
+            onsubmit: (e) => {
+              e.preventDefault();
+              sfxQuery = search.value = fsSearchIn.value;
+              if (sfxQuery.trim()) fsSide.activeCat = '';
+              doSideFreesoundSearch(1);
+            }
+          },
+            fsSearchIn,
+            h('button', { class: 'btn btn-primary btn-sm btn-icon', type: 'submit', title: 'Zoeken op Freesound' }, icon('search'))
+          );
+
           const chipsWrap = h('div', { class: 'fs-side-cats' },
             ...QUICK_CATEGORIES.map((cat) => h('button', {
               class: `sfx-filter-chip${fsSide.activeCat === cat.id && !sfxQuery.trim() ? ' active' : ''}`,
               type: 'button',
               onclick: () => {
                 fsSide.activeCat = cat.id;
-                sfxQuery = search.value = '';
+                sfxQuery = search.value = fsSearchIn.value = '';
                 if (cat.sort) fsSide.sort = cat.sort;
                 doSideFreesoundSearch(1);
               }
@@ -1378,6 +1421,7 @@ export async function mount(root, { id }) {
           );
 
           list.append(
+            fsSearchForm,
             chipsWrap,
             h('div', { class: 'fs-side-filters' }, sortSel, durSel)
           );

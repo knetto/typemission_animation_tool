@@ -415,7 +415,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
       sort,
       page: String(page),
       page_size: String(pageSize),
-      fields: 'id,name,tags,description,duration,previews,username,license,avg_rating,num_downloads',
+      fields: 'id,name,tags,description,duration,previews,images,username,license,avg_rating,num_downloads',
     });
     if (Number.isFinite(maxDur) && maxDur > 0) {
       params.set('filter', `duration:[0 TO ${maxDur}]`);
@@ -438,6 +438,11 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
         tags: Array.isArray(item.tags) ? item.tags.slice(0, 6) : [],
         rating: Number(item.avg_rating) || 0,
         downloads: Number(item.num_downloads) || 0,
+        waveformUrl:
+          item.images?.waveform_m ||
+          item.images?.waveform_l ||
+          item.images?.spectral_m ||
+          '',
         previewUrl:
           item.previews?.['preview-hq-mp3'] ||
           item.previews?.['preview-lq-mp3'] ||

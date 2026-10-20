@@ -1,7 +1,7 @@
 // Freesound API v2 Search, Browse, Preview, Favorite & Import UI + OAuth2 (http://localhost:3000/callback)
 import { h, icon, toast, modal, uid } from '../util.js';
 import { api, fileUrl } from '../api.js';
-import { previewAudio } from '../preview.js';
+import { previewAudio, createWaveBox } from '../preview.js';
 import { decodeUrl, SR } from './engine.js';
 import { sfxStore } from './sfxstore.js';
 
@@ -594,14 +594,28 @@ export function createFreesoundBrowser({ onImported, getCustomSfx, getFolders, s
 
       options.append(saveToMapBtn);
 
+      const waveBox = createWaveBox({
+        key: `fs:${item.id}`,
+        waveformUrl: item.waveformUrl,
+        audioUrl: item.previewUrl,
+        duration: item.duration,
+        playBtn,
+      });
+
       grid.append(
-        h('div', { class: 'sfx-tile fs-tile', style: { '--i': idx } },
-          playBtn,
-          h('div', { class: 'info' },
-            h('div', { class: 'name', title: displayName }, displayName),
-            h('div', { class: 'sub' }, subParts.join(' · '))
-          ),
-          h('div', { class: 'acts' }, favBtn, saveBtn, optionsBtn, options)
+        h('div', { class: 'fs-wave-card', style: { '--i': idx } },
+          waveBox,
+          h('div', { class: 'fs-wave-meta' },
+            h('div', { class: 'info' },
+              h('div', { class: 'name', title: displayName }, displayName),
+              h('div', { class: 'sub' },
+                h('span', { class: 'fs-author' }, item.username || 'Freesound'),
+                lic ? ` · ${lic}` : '',
+                item.downloads ? ` · ↓ ${item.downloads}` : ''
+              )
+            ),
+            h('div', { class: 'acts' }, favBtn, saveBtn, optionsBtn, options)
+          )
         )
       );
     });

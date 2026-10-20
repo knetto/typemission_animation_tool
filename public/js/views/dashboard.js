@@ -4,7 +4,7 @@ import { api, fileUrl } from '../api.js';
 import { logoSvg, SCENES } from '../scenes/renderer.js';
 import { BUILTIN_SFX, renderBuiltin } from '../audio/sfxlib.js';
 import { decodeUrl, SR } from '../audio/engine.js';
-import { previewAudio } from '../preview.js';
+import { previewAudio, createWaveBox } from '../preview.js';
 import { sfxStore } from '../audio/sfxstore.js';
 import { createSfxFolders } from '../audio/sfxui.js';
 import { createFreesoundBrowser } from '../audio/freesound.js';
@@ -376,12 +376,22 @@ export async function mount(root, { tab = 'projects' } = {}) {
         button.append(h('span', {}, button.title));
       });
 
-      return h('div', { class: 'sfx-tile', style: { '--i': i } },
+      const waveBox = createWaveBox({
+        key: isCustom ? `sfx:${s.id}` : `builtin:${s.key}`,
+        audioUrl: isCustom ? fileUrl.sfx(s) : null,
+        loadPcm: isCustom ? null : () => renderBuiltin(s.key),
+        duration: s.duration || 0,
         playBtn,
-        h('div', { class: 'info' },
-          h('div', { class: 'name' }, displayName),
-          h('div', { class: 'sub' }, hasAlias ? h('span', { class: 'badge', style: { fontSize: '9px', padding: '1px 4px', marginRight: '4px' } }, 'aangepast') : null, `${s.category || 'Eigen'}${s.duration ? ' · ' + s.duration.toFixed(1) + 's' : ''}`)),
-        acts
+      });
+
+      return h('div', { class: 'fs-wave-card', style: { '--i': i } },
+        waveBox,
+        h('div', { class: 'fs-wave-meta' },
+          h('div', { class: 'info' },
+            h('div', { class: 'name', title: displayName }, displayName),
+            h('div', { class: 'sub' }, hasAlias ? h('span', { class: 'badge', style: { fontSize: '9px', padding: '1px 4px', marginRight: '4px' } }, 'aangepast') : null, `${s.category || 'Eigen'}${s.duration ? ' · ' + s.duration.toFixed(1) + 's' : ''}`)),
+          acts
+        )
       );
     };
 
