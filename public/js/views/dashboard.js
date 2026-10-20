@@ -171,6 +171,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
     }, icon('upload'), h('span', {}, h('b', {}, 'Eigen geluiden uploaden'), h('span', {}, 'Kies audiobestanden of sleep ze hierheen. Beschikbaar in elk project.')));
 
     fsBrowser = createFreesoundBrowser({
+      getCustomSfx: () => custom,
       getFolders: () => sfxStore.getCustomFolders(custom),
       onImported: () => draw(),
     });
@@ -307,7 +308,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
         title: isFav ? 'Verwijder uit favorieten' : 'Als favoriet markeren',
         'aria-pressed': String(isFav),
         'aria-label': `${displayName} ${isFav ? 'uit favorieten verwijderen' : 'als favoriet markeren'}`,
-        onclick: (e) => { e.stopPropagation(); sfxStore.toggleFavorite(s); paint(); }
+        onclick: (e) => { e.stopPropagation(); sfxStore.toggleFavorite(s); fsBrowser?.refreshFolders(); paint(); }
       }, icon(isFav ? 'starFilled' : 'star'));
 
       const options = h('div', { class: 'sfx-options', id: uid('sfx-options'), popover: 'auto', 'aria-label': `Opties voor ${displayName}` });

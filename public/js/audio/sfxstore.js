@@ -3,6 +3,7 @@ const KEY_FAVORITES = 'ts_sfx_favorites';
 const KEY_COLLAPSED = 'ts_sfx_collapsed';
 const KEY_FOLDERS = 'ts_sfx_folders';
 const KEY_ALIASES = 'ts_sfx_aliases';
+const KEY_FS_MAP = 'ts_sfx_freesound_map';
 
 function readJson(key, def) {
   try {
@@ -142,5 +143,24 @@ export const sfxStore = {
     const aliases = sfxStore.getAliases();
     delete aliases[id];
     writeJson(KEY_ALIASES, aliases);
-  }
+  },
+
+  // Freesound ID -> Local SFX ID mapping
+  getFreesoundMap() {
+    return readJson(KEY_FS_MAP, {});
+  },
+  getFreesoundLocal(fsId, existingSfx = []) {
+    const map = sfxStore.getFreesoundMap();
+    const localId = map[String(fsId)];
+    if (!localId) return null;
+    if (existingSfx.length) {
+      return existingSfx.find((s) => Number(s.id) === Number(localId)) || null;
+    }
+    return { id: localId };
+  },
+  setFreesoundLocal(fsId, localId) {
+    const map = sfxStore.getFreesoundMap();
+    map[String(fsId)] = localId;
+    writeJson(KEY_FS_MAP, map);
+  },
 };

@@ -1436,11 +1436,17 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 
 /* ============ Freesound.org API v2 & OAuth2 Browser ============ */
 .fs-panel {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   border-radius: 14px;
-  border: 1px solid rgba(130, 175, 255, 0.22);
-  background: linear-gradient(180deg, rgba(20, 31, 54, 0.92), rgba(14, 22, 39, 0.95));
+  border: 1px solid rgba(130, 175, 255, 0.18);
+  background: #121c30;
   overflow: hidden;
+}
+.fs-panel.in-modal {
+  margin-bottom: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .fs-panel-head {
   display: flex;
@@ -1452,8 +1458,12 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
   user-select: none;
   transition: background 0.15s ease;
 }
-.fs-panel-head:hover {
-  background: rgba(255, 255, 255, 0.03);
+.fs-panel.in-modal .fs-panel-head {
+  cursor: default;
+  padding: 18px 22px 14px;
+}
+.fs-panel:not(.in-modal) .fs-panel-head:hover {
+  background: rgba(255, 255, 255, 0.025);
 }
 .fs-brand {
   display: flex;
@@ -1464,17 +1474,17 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .fs-logo-ico {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
-  background: rgba(79, 140, 255, 0.16);
-  border: 1px solid rgba(79, 140, 255, 0.32);
+  background: rgba(79, 140, 255, 0.14);
+  border: 1px solid rgba(79, 140, 255, 0.28);
   color: #82b3ff;
   flex-shrink: 0;
 }
 .fs-brand-text {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 .fs-brand-title-row {
@@ -1489,7 +1499,7 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 }
 .fs-brand-text > span {
   font-size: 12px;
-  color: #9fb2d1;
+  color: #97abc9;
 }
 .fs-status-badge {
   display: inline-flex;
@@ -1502,35 +1512,39 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
   color: #b7c8e4;
 }
 .fs-status-badge.ok {
-  background: rgba(16, 185, 129, 0.16);
+  background: rgba(16, 185, 129, 0.15);
   color: #6ee7b7;
-  border: 1px solid rgba(16, 185, 129, 0.32);
+  border: 1px solid rgba(16, 185, 129, 0.3);
 }
 .fs-status-badge.warn {
-  background: rgba(245, 158, 11, 0.16);
+  background: rgba(245, 158, 11, 0.15);
   color: #fcd34d;
-  border: 1px solid rgba(245, 158, 11, 0.32);
+  border: 1px solid rgba(245, 158, 11, 0.3);
 }
 .fs-head-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 .fs-panel-body {
   display: grid;
-  gap: 14px;
-  padding: 0 18px 18px;
+  gap: 12px;
+  padding: 14px 18px 18px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
-  padding-top: 16px;
 }
+.fs-panel.in-modal .fs-panel-body {
+  padding: 16px 22px 22px;
+}
+
+/* Clean API & OAuth2 Config Card */
 .fs-config-card {
   display: grid;
   gap: 12px;
   padding: 14px 16px;
   border-radius: 11px;
-  background: rgba(9, 15, 28, 0.72);
-  border: 1px solid rgba(130, 175, 255, 0.2);
+  background: #0d1526;
+  border: 1px solid rgba(130, 175, 255, 0.18);
 }
 .fs-config-header {
   display: flex;
@@ -1545,39 +1559,54 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .fs-config-header p {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #9fb2d1;
+  color: #97abc9;
+  line-height: 1.5;
 }
 .fs-config-header a {
   color: #82b3ff;
   text-decoration: underline;
 }
-.fs-callback-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 11px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-.fs-callback-label {
-  font-size: 12px;
-  color: #9fb2d1;
-}
-.fs-callback-code {
+.fs-callback-inline {
   font-family: 'Share Tech Mono', monospace;
-  font-size: 12px;
+  font-size: 11.5px;
   color: #93c5fd;
-  background: rgba(15, 23, 42, 0.8);
-  padding: 3px 8px;
-  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
   user-select: all;
+}
+.fs-copy-inline {
+  border: 1px solid rgba(130, 175, 255, 0.25);
+  background: rgba(79, 140, 255, 0.12);
+  color: #bad4ff;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.fs-copy-inline:hover {
+  background: rgba(79, 140, 255, 0.24);
+  color: #fff;
 }
 .fs-config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.fs-config-grid .field {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.fs-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
+  font-size: 12px;
+  color: #b8c7e0;
 }
 .fs-secret-input-wrap {
   display: flex;
@@ -1593,6 +1622,7 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 }
 .fs-saved-tag {
   color: #6ee7b7;
+  font-size: 11px;
   font-weight: 600;
 }
 .fs-config-actions {
@@ -1601,6 +1631,8 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* Search & Category Toolbar */
 .fs-search-bar {
   display: flex;
   align-items: center;
@@ -1608,19 +1640,23 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
   gap: 8px;
 }
 .fs-search-input {
-  flex: 1 1 260px;
+  flex: 1 1 220px;
   min-width: 180px;
 }
 .fs-select {
   width: auto;
-  min-width: 145px;
+  min-width: 132px;
+}
+.fs-search-submit {
+  height: 38px;
+  padding: 0 14px;
 }
 .fs-cat-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 .fs-chips {
   display: flex;
@@ -1628,43 +1664,52 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
   flex-wrap: wrap;
   gap: 6px;
 }
+
+/* Clean Sound Tiles in Dashboard & Modal */
 .fs-results-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(265px, 1fr));
   gap: 10px;
 }
-.fs-tile {
-  align-items: center;
+.sfx-tile .btn-fav {
+  color: rgba(255, 255, 255, 0.28);
+  transition: color 0.15s ease, transform 0.15s ease;
 }
-.fs-dur-badge {
-  display: inline-block;
-  padding: 1px 5px;
-  margin-right: 6px;
-  border-radius: 4px;
-  background: rgba(79, 140, 255, 0.16);
-  color: #93c5fd;
-  font-size: 10px;
-  font-weight: 600;
+.sfx-tile:hover .btn-fav {
+  color: rgba(255, 255, 255, 0.65);
 }
-.fs-tags {
-  margin-top: 3px;
-  font-size: 10px;
-  color: #7c90b6;
+.sfx-tile .btn-fav:hover {
+  color: #fbbf24;
+  transform: scale(1.12);
+}
+.sfx-tile .btn-fav.active {
+  color: #fbbf24;
+}
+.fs-tile .info {
+  min-width: 0;
+  overflow: hidden;
+}
+.fs-tile .name {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.fs-import-btn.imported {
-  background: rgba(16, 185, 129, 0.18);
-  border-color: rgba(16, 185, 129, 0.4);
-  color: #6ee7b7;
+.fs-tile .sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+.fs-save-icon-btn.saved {
+  color: #6ee7b7;
+  opacity: 0.85;
+}
+
 .fs-empty {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  padding: 24px 16px;
+  padding: 22px 16px;
   border-radius: 10px;
   border: 1px dashed rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.14);
@@ -1687,50 +1732,124 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 }
 .fs-pager-info {
   font-size: 12px;
-  color: #9fb2d1;
+  color: #97abc9;
 }
 .fs-pager-btns {
   display: flex;
   gap: 6px;
 }
+
+/* Dialogs */
 .fs-modal-dialog {
-  width: min(980px, calc(100vw - 32px));
+  width: min(940px, calc(100vw - 32px));
   max-height: calc(100dvh - 40px);
   padding: 0;
-  border-radius: 18px;
-  border: 1px solid rgba(130, 175, 255, 0.28);
-  background: #10192d;
+  border-radius: 16px;
+  border: 1px solid rgba(130, 175, 255, 0.24);
+  background: #111b2e;
   color: var(--text);
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.75);
+  overflow-y: auto;
 }
-.fs-modal-dialog::backdrop {
+.fs-modal-dialog::backdrop,
+.fs-config-dialog::backdrop {
   background: rgba(3, 8, 19, 0.72);
   backdrop-filter: blur(4px);
 }
-.fs-modal-inner {
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100dvh - 40px);
-  overflow-y: auto;
-  padding: 18px 20px;
+.fs-config-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(130, 175, 255, 0.25);
+  background: #0d1526;
+  color: var(--text);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75);
 }
-.fs-modal-top {
+.fs-config-dialog .fs-config-card {
+  border: 0;
+  padding: 20px;
+}
+
+/* ============ Editor Side-Menu Freesound Integration ============ */
+.sfx-filter-chip.active.fs-chip {
+  background: rgba(56, 189, 248, 0.18);
+  color: #bae6fd;
+  border-color: rgba(56, 189, 248, 0.45);
+}
+.fs-side-head-btns {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.fs-side-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.fs-side-cats .sfx-filter-chip {
+  padding: 4px 8px;
+  font-size: 10.5px;
+}
+.fs-side-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.fs-side-select {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  font-size: 11px;
+}
+.fs-side-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 20px 12px;
+  border-radius: 9px;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.12);
+  color: #97abc9;
+  font-size: 11.5px;
+  text-align: center;
+  line-height: 1.5;
+}
+.fs-side-empty p {
+  margin: 0;
+}
+.fs-side-pager {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 6px;
+  padding: 6px 2px 2px;
+  font-size: 11px;
+  color: #97abc9;
 }
-.fs-modal-top h3 {
+.fs-side-switch-banner {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 17px;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px dashed rgba(130, 175, 255, 0.28);
+  background: rgba(79, 140, 255, 0.08);
+  color: #b8d3ff;
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.fs-modal-inner .fs-panel {
-  margin-bottom: 0;
+.fs-side-switch-banner:hover {
+  background: rgba(79, 140, 255, 0.16);
+  border-color: rgba(130, 175, 255, 0.5);
+  color: #ffffff;
 }
+
 
 
 

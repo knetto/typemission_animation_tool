@@ -8,7 +8,14 @@ import { detectVoiced } from '../audio/dsp.js';
 import { previewAudio } from '../preview.js';
 import { sfxStore, sfxId } from '../audio/sfxstore.js';
 import { createSfxFolders } from '../audio/sfxui.js';
-import { openFreesoundModal } from '../audio/freesound.js';
+import {
+  QUICK_CATEGORIES,
+  cleanFreesoundName,
+  shortFreesoundLicense,
+  ensureFreesoundImported,
+  openFreesoundModal,
+  openFreesoundConfigModal,
+} from '../audio/freesound.js';
 import { initEditorPanels } from '../editor-panels.js';
 
 const TRACK_H = 116;
@@ -145,11 +152,21 @@ export async function mount(root, { id }) {
   async function addSource(src, name, trackId, start) {
     const done = busy('Audio laden…');
     try {
+      if (src?.type === 'freesound' && src.item) {
+        const row = await ensureFreesoundImported(src.item, {
+          category: 'Freesound',
+          existingSfx: customSfx,
+          onImported: async () => { customSfx = await api.sfx().catch(() => []); },
+        });
+        src = { type: 'sfx', id: row.id };
+        name = sfxStore.getName(row);
+      }
       await engine.getSource(src);
       const dur = engine.sourceDuration(src);
       const c = makeClip(src, name, trackId, start, dur);
       mutate(() => tl.clips.push(c));
       selected = new Set([c.id]); renderTimeline(); renderInspector();
+      if (mediaTab === 'sfx') renderMedia();
       return c;
     } catch (e) { toast('Kon audio niet laden: ' + e.message, 'err'); }
     finally { done(); }
@@ -636,7 +653,19 @@ export async function mount(root, { id }) {
   const sfxFileIn = h('input', { type: 'file', accept: 'audio/*', multiple: true, hidden: true, id: 'sfx-file' });
   sfxFileIn.onchange = () => { uploadSfx(sfxFileIn.files, uploadTargetFolder); sfxFileIn.value = ''; uploadTargetFolder = 'Eigen'; };
   let sfxQuery = '';
-  let sfxFilter = 'all'; // 'all' | 'fav'
+  let sfxFilter = 'all'; // 'all' | 'fav' | 'freesound'
+  const fsSide = {
+    status: null,
+    activeCat: 'popular',
+    sort: 'downloads_desc',
+    maxDuration: '5',
+    page: 1,
+    count: 0,
+    hasNext: false,
+    hasPrev: false,
+    loading: false,
+    results: [],
+  };
   let rec = null;
 
   async function uploadFiles(files) {
@@ -810,8 +839,69 @@ export async function mount(root, { id }) {
         }));
       });
     } else {
-      const search = h('input', { class: 'input', type: 'search', placeholder: 'Zoek effect…', value: sfxQuery, id: 'media-sfx-search', 'aria-label': 'Sound effects zoeken' });
-      search.oninput = () => { sfxQuery = search.value; paintList(); };
+      const search = h('input', {
+        class: 'input',
+        type: 'search',
+        placeholder: sfxFilter === 'freesound' ? 'Zoek op Freesound…' : 'Zoek effect…',
+        value: sfxQuery,
+        id: 'media-sfx-search',
+        'aria-label': 'Sound effects zoeken'
+      });
+
+      const doSideFreesoundSearch = async (page = 1) => {
+        if (!fsSide.status) {
+          fsSide.status = await api.freesoundStatus().catch(() => ({ configured: false }));
+        }
+        if (!fsSide.status.configured) {
+          paintList();
+          return;
+        }
+        const catObj = QUICK_CATEGORIES.find((c) => c.id === fsSide.activeCat);
+        const q = sfxQuery.trim() || catObj?.q || 'sound effect';
+        fsSide.loading = true;
+        fsSide.page = page;
+        paintList();
+        try {
+          const data = await api.freesoundSearch({
+            q,
+            sort: fsSide.sort,
+            maxDuration: fsSide.maxDuration,
+            page,
+            pageSize: 15,
+          });
+          fsSide.results = data.results || [];
+          fsSide.count = data.count || 0;
+          fsSide.hasNext = Boolean(data.next);
+          fsSide.hasPrev = Boolean(data.previous);
+        } catch (err) {
+          toast(err.message, 'err');
+          fsSide.results = [];
+        } finally {
+          fsSide.loading = false;
+          paintList();
+        }
+      };
+
+      const debouncedFsSearch = debounce(() => {
+        if (sfxFilter === 'freesound') {
+          if (sfxQuery.trim()) fsSide.activeCat = '';
+          else if (!fsSide.activeCat) fsSide.activeCat = 'popular';
+          doSideFreesoundSearch(1);
+        }
+      }, 380);
+
+      search.oninput = () => {
+        sfxQuery = search.value;
+        if (sfxFilter === 'freesound') debouncedFsSearch();
+        else paintList();
+      };
+      search.onkeydown = (e) => {
+        if (e.key === 'Enter' && sfxFilter === 'freesound') {
+          e.preventDefault();
+          if (sfxQuery.trim()) fsSide.activeCat = '';
+          doSideFreesoundSearch(1);
+        }
+      };
 
       const newFolderBtn = h('button', {
         class: 'btn btn-sm btn-ghost',
@@ -853,26 +943,137 @@ export async function mount(root, { id }) {
         }
       }, icon('upload'), 'Uploaden');
 
-      const freesoundBtn = h('button', {
-        class: 'btn btn-sm',
-        title: 'Geluiden zoeken en importeren via Freesound.org',
-        id: 'sfx-freesound-btn',
-        onclick: () => openFreesoundModal({
-          getFolders: () => sfxStore.getCustomFolders(customSfx),
-          onImported: async () => {
-            customSfx = await api.sfx().catch(() => []);
-            paintList();
-          }
-        })
-      }, icon('globe'), 'Freesound');
+      const switchToFreesound = async () => {
+        sfxFilter = 'freesound';
+        search.placeholder = 'Zoek op Freesound…';
+        if (!fsSide.status) {
+          fsSide.status = await api.freesoundStatus().catch(() => ({ configured: false }));
+        }
+        if (fsSide.status.configured && !fsSide.results.length && !fsSide.loading) {
+          doSideFreesoundSearch(1);
+        } else {
+          paintList();
+        }
+      };
 
       const toolbar = h('div', { class: 'sfx-toolbar' }, search,
-        h('div', { class: 'sfx-toolbar-actions' }, uploadBtn, freesoundBtn, newFolderBtn));
+        h('div', { class: 'sfx-toolbar-actions' }, uploadBtn, newFolderBtn));
       const list = h('div', { class: 'sfx-library-list' });
+      const captionRow = h('div', { class: 'sfx-list-caption' });
+
+      const refreshCustomSfx = async () => {
+        customSfx = await api.sfx().catch(() => []);
+      };
+
+      const renderFreesoundSideItem = (item) => {
+        const displayName = cleanFreesoundName(item.name);
+        const localItem = sfxStore.getFreesoundLocal(item.id, customSfx);
+        const isSaved = Boolean(localItem && localItem.id);
+        const isFav = isSaved && sfxStore.isFavorite({ id: localItem.id });
+        const lic = shortFreesoundLicense(item.license);
+        const subText = [`${item.duration.toFixed(1)}s`, item.username || 'Freesound', lic].filter(Boolean).join(' · ');
+
+        const handleFav = async () => {
+          try {
+            const row = await ensureFreesoundImported(item, {
+              category: 'Freesound',
+              existingSfx: customSfx,
+              onImported: refreshCustomSfx,
+            });
+            const nowFav = sfxStore.toggleFavorite({ id: row.id });
+            toast(nowFav ? `"${displayName}" bij Favorieten bewaard` : `"${displayName}" uit Favorieten verwijderd`, 'ok');
+            paintList();
+          } catch (err) {
+            toast(err.message, 'err');
+          }
+        };
+
+        const handleAdd = async () => {
+          const done = busy(`"${displayName}" laden…`);
+          try {
+            const row = await ensureFreesoundImported(item, {
+              category: 'Freesound',
+              existingSfx: customSfx,
+              onImported: refreshCustomSfx,
+            });
+            const src = { type: 'sfx', id: row.id };
+            const t = trackByKind('sfx');
+            await addSource(src, sfxStore.getName(row), t.id, playhead);
+            paintList();
+          } catch (err) {
+            toast(err.message, 'err');
+          } finally {
+            done();
+          }
+        };
+
+        const acts = [
+          {
+            label: isFav ? 'Verwijder uit favorieten' : 'Als favoriet markeren',
+            icon: isFav ? 'starFilled' : 'star',
+            action: handleFav,
+          },
+          {
+            label: 'Toevoegen aan tijdlijn',
+            icon: 'plus',
+            action: handleAdd,
+          },
+          {
+            label: isSaved ? 'Verplaatsen naar map…' : 'Opslaan in map…',
+            icon: 'folderMove',
+            action: async () => {
+              const allFolders = [...new Set(['Freesound', ...sfxStore.getCustomFolders(customSfx)])];
+              const res = await modal({
+                title: `"${displayName}" opslaan in map`,
+                body: 'Kies een map of typ een nieuwe:',
+                select: {
+                  options: allFolders.map((f) => ({ value: f, label: `📁 ${f}` })),
+                  value: localItem?.category || 'Freesound'
+                },
+                input: { placeholder: 'Of typ een nieuwe mapnaam…' },
+                confirm: 'Opslaan'
+              });
+              if (!res) return;
+              const target = (typeof res === 'object' ? (res.input?.trim() || res.select) : res).trim() || 'Freesound';
+              try {
+                const row = await ensureFreesoundImported(item, {
+                  category: target,
+                  existingSfx: customSfx,
+                  onImported: refreshCustomSfx,
+                });
+                if (row.category !== target) {
+                  await api.updateSfx(row.id, { category: target });
+                  row.category = target;
+                  sfxStore.addCustomFolder(target);
+                  await refreshCustomSfx();
+                }
+                toast(`"${displayName}" opgeslagen in "${target}"`, 'ok');
+                paintList();
+              } catch (err) {
+                toast(err.message, 'err');
+              }
+            }
+          }
+        ];
+
+        return mediaItem({
+          cls: 'sfx',
+          name: displayName,
+          src: isSaved ? { type: 'sfx', id: localItem.id } : { type: 'freesound', item },
+          badge: isSaved ? h('span', { class: 'badge', title: `Opgeslagen in ${localItem.category || 'Freesound'}` }, 'bewaard') : null,
+          sub: subText,
+          isFav,
+          onFav: handleFav,
+          onPlay: (b) => previewAudio.playUrl(item.previewUrl, b),
+          onAdd: handleAdd,
+          acts,
+        });
+      };
 
       const paintList = () => {
         const q = sfxQuery.trim().toLowerCase();
         const isSearching = Boolean(q);
+        search.placeholder = sfxFilter === 'freesound' ? 'Zoek op Freesound (bijv. click, sticker, beep)…' : 'Zoek effect…';
         folders.reset(q);
         const m = (s) => {
           if (!q) return true;
@@ -1099,8 +1300,144 @@ export async function mount(root, { id }) {
             class: `sfx-filter-chip fav-chip${sfxFilter === 'fav' ? ' active' : ''}`,
             'aria-pressed': String(sfxFilter === 'fav'),
             onclick: () => { sfxFilter = 'fav'; paintList(); }
-          }, icon('starFilled'), `Favorieten (${totalFavCount})`)
+          }, icon('starFilled'), `Favorieten (${totalFavCount})`),
+          h('button', {
+            class: `sfx-filter-chip fs-chip${sfxFilter === 'freesound' ? ' active' : ''}`,
+            'aria-pressed': String(sfxFilter === 'freesound'),
+            onclick: () => switchToFreesound()
+          }, icon('globe'), 'Freesound')
         );
+
+        if (sfxFilter === 'freesound') {
+          captionRow.replaceChildren(
+            h('span', {}, 'Freesound.org'),
+            h('div', { class: 'fs-side-head-btns' },
+              h('button', {
+                class: 'btn btn-ghost btn-sm',
+                type: 'button',
+                title: 'Freesound API Key & OAuth2 instellingen',
+                onclick: () => openFreesoundConfigModal({
+                  onSaved: (nextStatus) => {
+                    fsSide.status = nextStatus;
+                    if (nextStatus.configured) doSideFreesoundSearch(1);
+                    else paintList();
+                  }
+                })
+              }, icon('key'), 'API'),
+              h('button', {
+                class: 'btn btn-ghost btn-sm',
+                type: 'button',
+                title: 'Open groot Freesound overzicht',
+                onclick: () => openFreesoundModal({
+                  getCustomSfx: () => customSfx,
+                  getFolders: () => sfxStore.getCustomFolders(customSfx),
+                  onImported: async () => {
+                    await refreshCustomSfx();
+                    paintList();
+                  }
+                })
+              }, icon('full'))
+            )
+          );
+
+          const chipsWrap = h('div', { class: 'fs-side-cats' },
+            ...QUICK_CATEGORIES.map((cat) => h('button', {
+              class: `sfx-filter-chip${fsSide.activeCat === cat.id && !sfxQuery.trim() ? ' active' : ''}`,
+              type: 'button',
+              onclick: () => {
+                fsSide.activeCat = cat.id;
+                sfxQuery = search.value = '';
+                if (cat.sort) fsSide.sort = cat.sort;
+                doSideFreesoundSearch(1);
+              }
+            }, cat.label))
+          );
+
+          const sortSel = h('select', {
+            class: 'select fs-side-select',
+            'aria-label': 'Sorteren',
+            onchange: (e) => { fsSide.sort = e.target.value; doSideFreesoundSearch(1); }
+          },
+            h('option', { value: 'downloads_desc', selected: fsSide.sort === 'downloads_desc' }, 'Populairste'),
+            h('option', { value: 'score', selected: fsSide.sort === 'score' }, 'Relevantie'),
+            h('option', { value: 'rating_desc', selected: fsSide.sort === 'rating_desc' }, 'Beoordeling'),
+            h('option', { value: 'duration_asc', selected: fsSide.sort === 'duration_asc' }, 'Kortste eerst'),
+            h('option', { value: 'created_desc', selected: fsSide.sort === 'created_desc' }, 'Nieuwste')
+          );
+
+          const durSel = h('select', {
+            class: 'select fs-side-select',
+            'aria-label': 'Maximale lengte',
+            onchange: (e) => { fsSide.maxDuration = e.target.value; doSideFreesoundSearch(1); }
+          },
+            h('option', { value: '0', selected: fsSide.maxDuration === '0' }, 'Alle lengtes'),
+            h('option', { value: '2', selected: fsSide.maxDuration === '2' }, 'Max 2s'),
+            h('option', { value: '5', selected: fsSide.maxDuration === '5' }, 'Max 5s'),
+            h('option', { value: '10', selected: fsSide.maxDuration === '10' }, 'Max 10s'),
+            h('option', { value: '30', selected: fsSide.maxDuration === '30' }, 'Max 30s')
+          );
+
+          list.append(
+            chipsWrap,
+            h('div', { class: 'fs-side-filters' }, sortSel, durSel)
+          );
+
+          if (fsSide.loading) {
+            list.append(h('div', { class: 'fs-side-empty' }, h('span', { class: 'spinner' }), h('span', {}, 'Zoeken op Freesound…')));
+            return;
+          }
+
+          if (fsSide.status && !fsSide.status.configured) {
+            list.append(
+              h('div', { class: 'fs-side-empty' },
+                h('p', {}, 'Koppel je Freesound API Key om hier direct geluiden te zoeken, beluisteren en als favoriet te bewaren.'),
+                h('button', {
+                  class: 'btn btn-primary btn-sm',
+                  type: 'button',
+                  onclick: () => openFreesoundConfigModal({
+                    onSaved: (nextStatus) => {
+                      fsSide.status = nextStatus;
+                      if (nextStatus.configured) doSideFreesoundSearch(1);
+                    }
+                  })
+                }, icon('key'), 'API Key instellen')
+              )
+            );
+            return;
+          }
+
+          if (!fsSide.results.length) {
+            list.append(h('div', { class: 'fs-side-empty' }, 'Geen geluiden gevonden. Probeer een andere zoekterm of categorie.'));
+            return;
+          }
+
+          const itemsWrap = h('div', { class: 'sfx-folder-body' },
+            ...fsSide.results.map(renderFreesoundSideItem)
+          );
+          list.append(itemsWrap);
+
+          const totalPages = Math.max(1, Math.ceil(fsSide.count / 15));
+          list.append(
+            h('div', { class: 'fs-side-pager' },
+              h('button', {
+                class: 'btn btn-ghost btn-sm',
+                type: 'button',
+                disabled: !fsSide.hasPrev || fsSide.page <= 1,
+                onclick: () => doSideFreesoundSearch(fsSide.page - 1),
+              }, '←'),
+              h('span', {}, `Pagina ${fsSide.page}/${totalPages} (${fsSide.count.toLocaleString('nl-NL')})`),
+              h('button', {
+                class: 'btn btn-ghost btn-sm',
+                type: 'button',
+                disabled: !fsSide.hasNext,
+                onclick: () => doSideFreesoundSearch(fsSide.page + 1),
+              }, '→')
+            )
+          );
+          return;
+        }
+
+        captionRow.replaceChildren(h('span', {}, 'Categorieën'), toggleCollapseBtn);
 
         let renderedCount = 0;
 
@@ -1231,16 +1568,28 @@ export async function mount(root, { id }) {
         }
 
         if (renderedCount === 0 && sfxFilter !== 'fav') {
-          list.append(h('div', { class: 'hint', style: { padding: '24px 8px', textAlign: 'center' } },
-            isSearching ? `Geen effecten gevonden voor "${sfxQuery}"` : 'Geen effecten gevonden'));
+          list.append(h('div', { class: 'hint', style: { padding: '16px 8px', textAlign: 'center' } },
+            isSearching ? `Geen lokale effecten voor "${sfxQuery}"` : 'Geen effecten gevonden'));
+        }
+
+        if (sfxFilter === 'all') {
+          list.append(
+            h('button', {
+              class: 'fs-side-switch-banner',
+              type: 'button',
+              onclick: () => switchToFreesound()
+            },
+              icon('globe'),
+              h('span', {}, isSearching ? `Zoek "${sfxQuery}" op Freesound.org →` : 'Meer geluiden zoeken op Freesound.org →')
+            )
+          );
         }
         folders.sync();
       };
 
       const filterBar = h('div', { class: 'sfx-filter-bar', role: 'group', 'aria-label': 'Effecten filteren' });
-      mediaBody.append(h('div', { class: 'sfx-controls' }, toolbar, filterBar,
-        h('div', { class: 'sfx-list-caption' }, h('span', {}, 'Categorieën'), toggleCollapseBtn)),
-        h('p', { class: 'sfx-help' }, '▶ beluisteren · + toevoegen aan tijdlijn'), sfxFileIn, list);
+      mediaBody.append(h('div', { class: 'sfx-controls' }, toolbar, filterBar, captionRow),
+        h('p', { class: 'sfx-help' }, '▶ beluisteren · ★ favoriet · + op tijdlijn'), sfxFileIn, list);
       paintList();
     }
   }
