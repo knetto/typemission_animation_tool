@@ -4,6 +4,7 @@ import {
   normalizeFileOpts,
   getActiveFileItems,
   parseLogEntries,
+  scrambleText,
   fileSchedule,
   sequenceAt,
   fileSoundtrack,
@@ -41,18 +42,18 @@ export async function createFileScene(canvas, images, options = {}) {
     if (stroke) { g.strokeStyle = stroke; g.lineWidth = lineWidth; g.strokeRect(x, y, w, h); }
   };
   const text = (s, x, y, size = 24, color = colors.ink, weight = 'normal') => {
-    g.font = `${weight} ${size}px "Courier New", monospace`;
+    g.font = `${weight} ${size}px "Consolas", "Share Tech Mono", "Courier New", monospace`;
     g.fillStyle = color;
     g.fillText(String(s), x, y);
   };
   const fit = (value, max, size = 24, weight = 'normal') => {
-    g.font = `${weight} ${size}px "Courier New", monospace`;
+    g.font = `${weight} ${size}px "Consolas", "Share Tech Mono", "Courier New", monospace`;
     let s = String(value ?? '');
     while (s.length > 2 && g.measureText(s).width > max) s = s.slice(0, -2) + '…';
     return s;
   };
-  const wrapLines = (rawText, maxWidth, size = 25, maxLines = 12) => {
-    g.font = `${size}px "Courier New", monospace`;
+  const wrapLines = (rawText, maxWidth, size = 23, maxLines = 9) => {
+    g.font = `bold ${size}px "Consolas", "Share Tech Mono", "Courier New", monospace`;
     const out = [];
     for (const para of String(rawText ?? '').split(/\r?\n/)) {
       if (!para.trim()) {
@@ -82,7 +83,7 @@ export async function createFileScene(canvas, images, options = {}) {
     g.drawImage(b, x + (w - b.width * scale) / 2, y + (h - b.height * scale) / 2, b.width * scale, b.height * scale);
   };
 
-  const drawTilePreview = (item, x, y, w, h) => {
+  const drawTilePreview = (item, x, y, w, h, t = 0) => {
     if (opts.variant === 'images') {
       photo(item, x, y, w, h);
       return;
@@ -90,26 +91,39 @@ export async function createFileScene(canvas, images, options = {}) {
     rect(x, y, w, h, colors.panel, colors.border, 1.5);
     if (opts.variant === 'login_log') {
       rect(x, y, w, 28, colors.bar);
-      text('LOG // AUTH', x + 10, y + 20, 15, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
-      const entries = parseLogEntries(item.entriesText).slice(0, 3);
-      entries.forEach((e, i) => {
-        const isWarn = /denied|breach|alert|fail|err|block/i.test(e.status);
-        const lineY = y + 50 + i * 24;
-        text(fit(`${e.time.slice(-8) || '03:11'} ${e.user || 'root'} [${e.status}]`, w - 20, 14), x + 10, lineY, 14, isWarn ? colors.warn : colors.ink);
-      });
+      text('ACCESS LOG', x + 10, y + 20, 15, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
+      // Draw 4 green granted bars + 1 red unauthorized bar
+      for (let i = 0; i < 4; i++) {
+        const ry = y + 36 + i * 19;
+        const isUnauth = i === 3;
+        rect(x + 12, ry, w - 24, 13, isUnauth ? colors.warnBg : colors.bg, isUnauth ? colors.warn : colors.border, 1);
+        rect(x + 16, ry + 3, isUnauth ? w - 90 : w - 110, 7, isUnauth ? colors.warn : colors.accent);
+        text(isUnauth ? 'UNAUTH' : 'OK', x + w - 68, ry + 11, 11, isUnauth ? colors.warn : colors.accent, 'bold');
+      }
     } else if (opts.variant === 'email') {
       rect(x, y, w, 28, colors.bar);
-      text('MAIL // MSG', x + 10, y + 20, 15, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
-      text(fit(`FROM: ${item.from || 'HQ'}`, w - 20, 14), x + 10, y + 52, 14, colors.muted);
-      text(fit(`SUBJ: ${item.subject || 'Briefing'}`, w - 20, 15, 'bold'), x + 10, y + 78, 15, colors.accent, 'bold');
-      text(fit(String(item.body || '').replace(/\s+/g, ' '), w - 20, 13), x + 10, y + 103, 13, colors.ink);
+      text('ENCRYPTED MAIL', x + 10, y + 20, 15, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
+      // Draw crisp envelope icon + scrambled preview lines
+      const ex = x + 18, ey = y + 42, ew = 68, eh = 50;
+      rect(ex, ey, ew, eh, colors.bg, colors.accent, 2);
+      g.strokeStyle = colors.accent;
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(ex, ey);
+      g.lineTo(ex + ew / 2, ey + 26);
+      g.lineTo(ex + ew, ey);
+      g.stroke();
+      const tick = Math.floor(t * 6);
+      text(fit(scrambleText('SUBJECT STREAM', tick, 1), w - 108, 14, 'bold'), x + 98, y + 56, 14, colors.warn, 'bold');
+      text(fit(scrambleText('MESSAGE DATA LOCKED', tick, 2), w - 108, 13), x + 98, y + 78, 13, colors.muted);
+      rect(x + 98, y + 86, w - 112, 8, colors.selected);
     }
   };
 
   const drawLogViewer = (item, t, openAt, hold, count) => {
     const elapsed = Math.max(0, t - openAt);
     const entries = parseLogEntries(item.entriesText);
-    const revealDur = Math.min(1.1, hold * 0.42);
+    const revealDur = Math.min(1.0, hold * 0.4);
     const visibleCount = revealDur > 0.05
       ? Math.max(1, Math.min(entries.length, Math.ceil((elapsed / revealDur) * entries.length)))
       : entries.length;
@@ -129,98 +143,179 @@ export async function createFileScene(canvas, images, options = {}) {
     }
 
     // Column headers
-    rect(210, tableTop, 1500, 42, colors.selected, colors.border);
-    text('TIMESTAMP', 228, tableTop + 28, 19, colors.accent, 'bold');
-    text('USER', 530, tableTop + 28, 19, colors.accent, 'bold');
-    text('IP ADDRESS', 790, tableTop + 28, 19, colors.accent, 'bold');
-    text('EVENT / ACTION', 1085, tableTop + 28, 19, colors.accent, 'bold');
-    text('STATUS', 1495, tableTop + 28, 19, colors.accent, 'bold');
+    rect(210, tableTop, 1500, 44, colors.selected, colors.border);
+    text('TIMESTAMP', 228, tableTop + 29, 20, colors.accent, 'bold');
+    text('USER', 535, tableTop + 29, 20, colors.accent, 'bold');
+    text('IP ADDRESS', 790, tableTop + 29, 20, colors.accent, 'bold');
+    text('EVENT / ACTION', 1075, tableTop + 29, 20, colors.accent, 'bold');
+    text('STATUS', 1455, tableTop + 29, 20, colors.accent, 'bold');
 
-    const maxRows = Math.floor((880 - (tableTop + 50)) / 52);
+    const maxRows = Math.floor((880 - (tableTop + 52)) / 56);
     const shownEntries = entries.slice(0, visibleCount).slice(-maxRows);
 
     shownEntries.forEach((entry, idx) => {
-      const rowY = tableTop + 50 + idx * 52;
-      const isFlagged = /denied|breach|alert|fail|err|block|intrusion/i.test(entry.status);
-      rect(210, rowY, 1500, 46, isFlagged ? colors.warnBg : (idx % 2 === 0 ? colors.panel : colors.bg), isFlagged ? colors.warn : colors.border, 1);
+      const rowY = tableTop + 54 + idx * 56;
+      const isFlagged = /unauth|denied|breach|alert|fail|err|block|intrusion/i.test(entry.status);
+      rect(210, rowY, 1500, 48, isFlagged ? colors.warnBg : (idx % 2 === 0 ? colors.panel : colors.bg), isFlagged ? colors.warn : colors.border, isFlagged ? 2 : 1);
 
       if (entry.raw) {
-        text(fit(entry.raw, 1240, 21), 228, rowY + 30, 21, isFlagged ? colors.warn : colors.ink);
+        text(fit(entry.raw, 1200, 21, 'bold'), 228, rowY + 31, 21, isFlagged ? colors.warn : colors.ink, 'bold');
       } else {
-        text(fit(entry.time, 285, 20), 228, rowY + 30, 20, colors.muted);
-        text(fit(entry.user, 240, 21, 'bold'), 530, rowY + 30, 21, colors.ink, 'bold');
-        text(fit(entry.ip, 275, 20), 790, rowY + 30, 20, colors.ink);
-        text(fit(entry.action, 390, 20), 1085, rowY + 30, 20, isFlagged ? colors.warn : colors.ink);
+        text(fit(entry.time, 290, 20), 228, rowY + 31, 20, colors.muted);
+        text(fit(entry.user, 240, 22, 'bold'), 535, rowY + 31, 22, isFlagged ? colors.warn : colors.ink, 'bold');
+        text(fit(entry.ip, 265, 20), 790, rowY + 31, 20, colors.ink);
+        text(fit(entry.action, 365, 20, 'bold'), 1075, rowY + 31, 20, isFlagged ? colors.warn : colors.ink, 'bold');
       }
       const badgeText = isFlagged ? `[! ${entry.status}]` : `[OK ${entry.status}]`;
-      text(fit(badgeText, 195, 19, 'bold'), 1495, rowY + 30, 19, isFlagged ? colors.warn : colors.accent, 'bold');
+      text(fit(badgeText, 235, 20, 'bold'), 1455, rowY + 31, 20, isFlagged ? colors.warn : colors.accent, 'bold');
     });
 
-    const flaggedCount = entries.filter((e) => /denied|breach|alert|fail|err|block|intrusion/i.test(e.status)).length;
-    text(`${entries.length} ENTRIES  ·  FLAGGED: ${flaggedCount}  ·  ${hold.toFixed(1)}s  ·  LOG ${count}/${items.length}`, 210, 935, 20, colors.muted);
+    const flaggedCount = entries.filter((e) => /unauth|denied|breach|alert|fail|err|block|intrusion/i.test(e.status)).length;
+    text(`${entries.length} ENTRIES  ·  UNAUTHORIZED: ${flaggedCount}  ·  ${hold.toFixed(1)}s  ·  LOG ${count}/${items.length}`, 210, 935, 20, colors.muted);
   };
 
   const drawEmailViewer = (item, t, openAt, hold, count) => {
     const elapsed = Math.max(0, t - openAt);
+    const isScrambled = item.scrambled !== false;
+    const tick = Math.floor(t * 7);
+    const maybeScramble = (str, seed) => (isScrambled ? scrambleText(str, tick, seed) : String(str ?? ''));
 
-    // Header metadata panel
-    rect(210, 228, 1500, 196, colors.panel, colors.border);
+    // 1. Left Mail Client Sidebar
+    const sideX = 204, sideY = 224, sideW = 286, sideH = 684;
+    rect(sideX, sideY, sideW, sideH, colors.panel, colors.border);
 
-    if (item.badge && item.badge.trim()) {
-      const badgeStr = ` ${item.badge.trim()} `;
-      g.font = 'bold 19px "Courier New", monospace';
-      const bw = Math.min(460, g.measureText(badgeStr).width + 24);
-      rect(1690 - bw, 244, bw, 36, colors.selected, colors.accent, 2);
-      text(fit(badgeStr, bw - 12, 19, 'bold'), 1696 - bw, 269, 19, colors.accent, 'bold');
-    }
+    // Compose button inside sidebar
+    rect(sideX + 16, sideY + 16, sideW - 32, 42, colors.selected, colors.accent, 1.5);
+    text('+ NEW MESSAGE', sideX + 42, sideY + 44, 19, colors.accent, 'bold');
 
-    text('FROM   :', 232, 268, 21, colors.muted, 'bold');
-    text(fit(item.from || '-', 960, 22), 360, 268, 22, colors.ink);
+    const mailboxes = [
+      ['> INBOX', '01', true],
+      ['  INTERCEPTED', '03', false],
+      ['  ENCRYPTED', '12', false],
+      ['  QUARANTINE', '01', false],
+      ['  SENT LOGS', '00', false],
+      ['  TRASH', '04', false],
+    ];
+    mailboxes.forEach(([mLabel, mCount, active], idx) => {
+      const my = sideY + 76 + idx * 46;
+      if (active) rect(sideX + 12, my, sideW - 24, 40, colors.selected, colors.accent, 1);
+      text(mLabel, sideX + 22, my + 27, 18, active ? colors.accent : colors.ink, active ? 'bold' : 'normal');
+      text(`[${mCount}]`, sideX + sideW - 64, my + 27, 17, active ? colors.accent : colors.muted, 'bold');
+    });
 
-    text('TO     :', 232, 306, 21, colors.muted, 'bold');
-    text(fit(item.to || '-', 960, 22), 360, 306, 22, colors.ink);
+    // Security / Cipher status box at bottom of sidebar
+    const secY = sideY + sideH - 188;
+    rect(sideX + 14, secY, sideW - 28, 172, colors.bg, isScrambled ? colors.warn : colors.border, 1.5);
+    text('CIPHER MONITOR', sideX + 28, secY + 30, 17, colors.muted, 'bold');
+    text(isScrambled ? 'STATUS: SCRAMBLED' : 'STATUS: VERIFIED', sideX + 28, secY + 60, 18, isScrambled ? colors.warn : colors.accent, 'bold');
+    text(isScrambled ? 'KEY   : MISSING [!]' : 'KEY   : RSA-4096 OK', sideX + 28, secY + 88, 17, isScrambled ? colors.warn : colors.ink);
+    text('STREAM: ' + (isScrambled ? scrambleText('0x9F 0x4A 0xC1', tick, 77) : 'CLEAN'), sideX + 28, secY + 116, 16, colors.muted);
+    // Progress / corruption bar
+    rect(sideX + 28, secY + 134, sideW - 56, 18, colors.panel, colors.border, 1);
+    rect(sideX + 30, secY + 136, isScrambled ? 68 : sideW - 60, 14, isScrambled ? colors.warn : colors.accent);
 
-    text('DATE   :', 232, 344, 21, colors.muted, 'bold');
-    text(fit(item.date || '-', 960, 21), 360, 344, 21, colors.muted);
+    // 2. Right Reading Pane
+    const mainX = 504, mainY = 224, mainW = 1212;
 
-    text('SUBJECT:', 232, 392, 23, colors.accent, 'bold');
-    text(fit(item.subject || '(Geen onderwerp)', 1310, 25, 'bold'), 360, 392, 25, colors.accent, 'bold');
+    // Top Mail Action Toolbar
+    rect(mainX, mainY, mainW, 48, colors.panel, colors.border);
+    const actions = ['[ ↩ REPLY ]', '[ ↪ FORWARD ]', '[ 🔓 DECRYPT ]', '[ ⚑ TRACE ]'];
+    actions.forEach((act, idx) => {
+      const ax = mainX + 16 + idx * 176;
+      rect(ax, mainY + 8, 164, 32, colors.bg, colors.border, 1);
+      text(act, ax + 14, mainY + 30, 16, colors.ink, 'bold');
+    });
 
-    // Body container
+    const badgeText = ` ${item.badge?.trim() || (isScrambled ? 'SCRAMBLED // UNREADABLE' : 'CLASSIFIED')} `;
+    g.font = 'bold 17px "Consolas", "Share Tech Mono", monospace';
+    const bw = Math.min(420, g.measureText(badgeText).width + 24);
+    rect(mainX + mainW - bw - 14, mainY + 8, bw, 32, isScrambled ? colors.warnBg : colors.selected, isScrambled ? colors.warn : colors.accent, 1.5);
+    text(fit(badgeText, bw - 10, 17, 'bold'), mainX + mainW - bw - 6, mainY + 30, 17, isScrambled ? colors.warn : colors.accent, 'bold');
+
+    // 3. Email Metadata Header Box
+    const hdrY = 282, hdrH = 166;
+    rect(mainX, hdrY, mainW, hdrH, colors.panel, colors.border);
+
+    // Sender Avatar / Envelope Seal
+    const avX = mainX + 20, avY = hdrY + 22, avS = 74;
+    rect(avX, avY, avS, avS, isScrambled ? colors.warnBg : colors.selected, isScrambled ? colors.warn : colors.accent, 2);
+    text(isScrambled ? '?!' : '✉', avX + (isScrambled ? 18 : 22), avY + 49, 34, isScrambled ? colors.warn : colors.accent, 'bold');
+
+    // Header rows
+    const metaX = mainX + 114;
+    text('FROM   :', metaX, hdrY + 38, 19, colors.muted, 'bold');
+    text(fit(maybeScramble(item.from || 'unknown@relay', 11), 720, 21, 'bold'), metaX + 110, hdrY + 38, 21, colors.ink, 'bold');
+
+    const dateStr = fit(item.date || '20 OKT 2026', 320, 18);
+    text(dateStr, mainX + mainW - g.measureText(dateStr).width - 20, hdrY + 38, 18, colors.muted);
+
+    text('TO     :', metaX, hdrY + 72, 19, colors.muted, 'bold');
+    text(fit(maybeScramble(item.to || 'operator@archive', 22), 920, 20), metaX + 110, hdrY + 72, 20, colors.ink);
+
+    text('SUBJECT:', metaX, hdrY + 112, 20, isScrambled ? colors.warn : colors.accent, 'bold');
+    text(fit(maybeScramble(item.subject || 'ENCRYPTED MESSAGE', 33), 940, 23, 'bold'), metaX + 110, hdrY + 112, 23, isScrambled ? colors.warn : colors.accent, 'bold');
+
+    // Warning strip inside header bottom
+    rect(mainX + 14, hdrY + 126, mainW - 28, 30, isScrambled ? colors.warnBg : colors.bg, isScrambled ? colors.warn : colors.border, 1);
+    text(
+      isScrambled
+        ? '[!] PAYLOAD SCRAMBLED — CIPHER LOCK ACTIVE (MESSAGE CONTENT UNREADABLE)'
+        : '[OK] AUTHENTICATED TRANSMISSION — TLS/PGP SIGNATURE VERIFIED',
+      mainX + 26,
+      hdrY + 147,
+      16,
+      isScrambled ? colors.warn : colors.accent,
+      'bold'
+    );
+
+    // 4. Message Body Area
     const hasAttachment = Boolean(item.attachment && item.attachment.trim());
-    const bodyHeight = hasAttachment ? 410 : 466;
-    rect(210, 438, 1500, bodyHeight, colors.bg, colors.border);
+    const bodyY = 458;
+    const bodyH = hasAttachment ? 388 : 450;
+    rect(mainX, bodyY, mainW, bodyH, colors.bg, colors.border);
 
-    const lines = wrapLines(item.body || '', 1440, 25, hasAttachment ? 9 : 11);
-    const totalChars = lines.reduce((acc, l) => acc + l.length, 0) || 1;
-    const revealDur = Math.min(1.35, hold * 0.45);
-    let remainingChars = revealDur > 0.05
-      ? Math.ceil(Math.min(1, elapsed / revealDur) * totalChars)
-      : totalChars;
+    // Left hex offset gutter inside body
+    const gutterW = 92;
+    rect(mainX, bodyY, gutterW, bodyH, colors.panel, colors.border, 1);
 
-    let cursorX = 236;
-    let cursorY = 486;
-    lines.forEach((line, idx) => {
-      const y = 486 + idx * 40;
-      if (remainingChars <= 0 && line.length > 0) return;
-      const slice = line.slice(0, Math.max(0, remainingChars));
-      remainingChars -= line.length;
-      text(slice, 236, y, 25, colors.ink);
-      g.font = '25px "Courier New", monospace';
-      cursorX = 236 + g.measureText(slice).width + 6;
+    const rawLines = wrapLines(item.body || '', mainW - gutterW - 56, 23, hasAttachment ? 8 : 9);
+    const revealDur = Math.min(0.9, hold * 0.32);
+    const totalLines = rawLines.length || 1;
+    const visibleLines = revealDur > 0.05
+      ? Math.max(1, Math.min(totalLines, Math.ceil((elapsed / revealDur) * totalLines)))
+      : totalLines;
+
+    let cursorX = mainX + gutterW + 24;
+    let cursorY = bodyY + 44;
+
+    rawLines.slice(0, visibleLines).forEach((line, idx) => {
+      const y = bodyY + 44 + idx * 42;
+      const hexOffset = `00${(idx + 1) * 10}:`;
+      text(hexOffset, mainX + 16, y, 18, colors.muted, 'bold');
+
+      if (!line.trim()) return;
+      const renderedLine = maybeScramble(line, 100 + idx * 13);
+      text(fit(renderedLine, mainW - gutterW - 44, 23, 'bold'), mainX + gutterW + 24, y, 23, isScrambled ? colors.ink : colors.ink, 'bold');
+      g.font = 'bold 23px "Consolas", "Share Tech Mono", monospace';
+      cursorX = mainX + gutterW + 24 + g.measureText(renderedLine).width + 8;
       cursorY = y;
     });
 
     if (Math.floor(t * 3) % 2 === 0) {
-      text('█', Math.min(1675, cursorX), cursorY, 24, colors.accent);
+      text('█', Math.min(mainX + mainW - 28, cursorX), cursorY, 22, isScrambled ? colors.warn : colors.accent, 'bold');
     }
 
+    // 5. Attachment Bar
     if (hasAttachment) {
-      rect(210, 860, 1500, 44, colors.panel, colors.border);
-      text(fit(`ATTACHMENT: [+] ${item.attachment.trim()}   ·   ENCRYPTED CHANNEL VERIFIED`, 1450, 20), 230, 889, 20, colors.accent);
+      const attY = 856;
+      rect(mainX, attY, mainW, 52, colors.panel, colors.border);
+      const attName = maybeScramble(item.attachment.trim(), 505);
+      rect(mainX + 16, attY + 9, 540, 34, colors.bg, isScrambled ? colors.warn : colors.accent, 1.5);
+      text(fit(`[📎 ${attName}]  ·  148 KB`, 516, 18, 'bold'), mainX + 28, attY + 32, 18, isScrambled ? colors.warn : colors.accent, 'bold');
+      text(isScrambled ? 'ATTACHMENT LOCKED // ENCRYPTED' : 'ATTACHMENT READY', mainX + 580, attY + 32, 17, colors.muted, 'bold');
     }
 
-    text(`${hold.toFixed(1)}s  ·  EMAIL ${count}/${items.length}`, 210, 935, 20, colors.muted);
+    text(`${hold.toFixed(1)}s  ·  EMAIL ${count}/${items.length}  ·  ${isScrambled ? 'CIPHER: SCRAMBLED' : 'DECODED'}`, 204, 936, 19, colors.muted);
   };
 
   function pointer(x, y, pressed = false) {
@@ -233,7 +328,7 @@ export async function createFileScene(canvas, images, options = {}) {
     rect(0, 0, W, H, colors.bg);
     rect(76, 65, W - 152, H - 130, colors.panel, colors.border);
     rect(76, 65, W - 152, 54, colors.bar);
-    text('TERMINAL / SECURE SESSION', 100, 103, 25, opts.theme === 'blue' ? '#000080' : colors.ink);
+    text('TERMINAL / SECURE SESSION', 100, 103, 25, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
     const lines = ['System Login'];
     if (t >= 0.8) lines.push('Username: ' + opts.username.slice(0, Math.max(0, Math.floor((t - 1) / 0.055))));
     if (t >= 1.95) lines.push('Password: ' + '*'.repeat(Math.max(0, Math.min(8, Math.floor((t - 2.1) / 0.06)))));
@@ -280,7 +375,7 @@ export async function createFileScene(canvas, images, options = {}) {
     const cursor = ending ? outroPointer(schedule.outro, t) : s ? filePointer(s, t, { folder: folderPoint, file: target, first: s === schedule.segments[0] }) : null;
     rect(60, 60, 1800, 960, colors.panel, colors.border);
     rect(60, 60, 1800, 58, colors.bar);
-    text(opts.title, 88, 99, 27, opts.theme === 'blue' ? '#000080' : colors.ink);
+    text(opts.title, 88, 99, 27, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
     if (cursor?.hover === 'explorer-close') rect(1778, 72, 44, 37, colors.accent + '35', colors.border);
     text('—  □  ×', 1690, 99, 28, opts.theme === 'blue' ? '#000080' : colors.ink);
     text('File    Edit    View    Navigate    Help', 88, 155, 23, colors.muted);
@@ -308,7 +403,7 @@ export async function createFileScene(canvas, images, options = {}) {
         if (hovered) { g.shadowColor = colors.accent; g.shadowBlur = 14; }
         rect(x, y, 312, 182, selected || hovered ? colors.selected : colors.bg, selected || hovered ? colors.accent : colors.border);
         g.restore();
-        drawTilePreview(item, x + 14, y + 12, 284, 120);
+        drawTilePreview(item, x + 14, y + 12, 284, 120, t);
         text(fit(item.name, 282, 20), x + 14, y + 163, 20);
       });
     } else {
@@ -337,7 +432,7 @@ export async function createFileScene(canvas, images, options = {}) {
         g.fillStyle = '#000a'; g.fillRect(60, 118, 1800, 902);
         rect(180, 155, 1560, 805, colors.bg, colors.accent);
         rect(180, 155, 1560, 55, colors.bar);
-        text(fit(s.image.name, 1360, 26), 205, 192, 26, opts.theme === 'blue' ? '#000080' : colors.ink);
+        text(fit(s.image.name, 1360, 26, 'bold'), 205, 192, 26, opts.theme === 'blue' ? '#000080' : colors.ink, 'bold');
         if (cursor.hover === 'close') rect(1684, 164, 45, 38, colors.accent + '35', colors.border);
         text('×', 1695, 192, 30, opts.theme === 'blue' ? '#000080' : colors.ink);
         if (opts.variant === 'login_log') {
@@ -351,8 +446,6 @@ export async function createFileScene(canvas, images, options = {}) {
       }
       pointer(cursor.x, cursor.y, cursor.pressed);
     } else text('Add files to begin your sequence.', 480, 460, 30);
-    // Static subtle monitor texture; no random state so seeking matches export.
-    if (opts.theme === 'green') { g.fillStyle = '#00000010'; for (let y = 0; y < H; y += 4) g.fillRect(0, y, W, 1); }
     g.restore();
   }
   return { schedule, soundtrack, draw, reset() {}, dispose() { loaded.forEach((b) => b.close()); loaded.clear(); } };

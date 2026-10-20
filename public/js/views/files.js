@@ -255,7 +255,10 @@ export async function mount(root, { id, project, exportingView = false }) {
     selected = imageId;
     stop();
     const segment = scene?.schedule.segments.find((s) => s.image.id === imageId);
-    if (segment) draw(segment.open + 0.05);
+    if (segment) {
+      const offset = opts.variant === 'images' ? 0.05 : Math.min(1.1, segment.hold * 0.45);
+      draw(segment.open + offset);
+    }
     paintFiles();
     paintSettings();
   }
@@ -465,12 +468,12 @@ export async function mount(root, { id, project, exportingView = false }) {
           type: 'button',
           class: 'btn btn-sm',
           onclick: () => {
-            const line = '2026-10-20 03:15:44 | unknown     | 185.220.101.47 | ROOT_ESCALATE  | BREACH';
+            const line = '2026-10-20 03:11:08 | unknown     | 185.220.101.47 | UNAUTHORIZED_ACCESS | UNAUTHORIZED';
             logItem.entriesText = (logItem.entriesText ? logItem.entriesText.trimEnd() + '\n' : '') + line;
             entriesArea.value = logItem.entriesText;
             syncLog();
           }
-        }, icon('plus'), 'BREACH regel')
+        }, icon('plus'), 'UNAUTHORIZED regel')
       ),
       opts.logs.length > 1 ? h('button', {
         type: 'button',
@@ -497,11 +500,24 @@ export async function mount(root, { id, project, exportingView = false }) {
       paintFiles();
     };
     card.append(
+      h('label', { class: 'toggle' },
+        h('input', {
+          type: 'checkbox',
+          checked: emailItem.scrambled !== false,
+          onchange: (e) => {
+            emailItem.scrambled = e.target.checked;
+            syncEmail();
+          }
+        }),
+        h('span', { class: 'track' }),
+        'Tekst scramblen / gecodeerd (onleesbaar)'
+      ),
+      h('p', { class: 'hint' }, 'Standaard aan voor de missie: vervangt alle tekst in de e-mail door onleesbare cipher-tekens.'),
       h('label', { class: 'field' }, 'Bestandsnaam in Explorer', h('input', {
         class: 'input',
         value: emailItem.name,
         maxlength: 160,
-        onchange: (e) => { emailItem.name = e.target.value.trim() || 'urgent_briefing.eml'; syncEmail(); }
+        onchange: (e) => { emailItem.name = e.target.value.trim() || 'intercepted_mail_04.eml'; syncEmail(); }
       })),
       h('label', { class: 'field' }, 'Kijktijd (seconden)', h('input', {
         class: 'input',

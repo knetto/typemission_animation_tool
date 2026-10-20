@@ -37,42 +37,61 @@ export function defaultLogItem(index = 1) {
     folder: 'Logs',
     duration: 5,
     node: 'NODE: HQ-GATEWAY-04',
-    alert: 'SECURITY ALERT: UNAUTHORIZED LOGIN DETECTED',
+    alert: 'SECURITY ALERT: UNAUTHORIZED ACCESS LOGIN DETECTED',
     entriesText: [
-      '2026-10-20 02:11:04 | operator_01 | 10.14.0.22     | TERMINAL_AUTH  | GRANTED',
-      '2026-10-20 02:44:19 | sys_backup  | 10.14.0.05     | ARCHIVE_SYNC   | GRANTED',
-      '2026-10-20 03:08:51 | unknown     | 185.220.101.47 | SSH_LOGIN      | DENIED',
-      '2026-10-20 03:09:12 | unknown     | 185.220.101.47 | BRUTE_FORCE    | DENIED',
-      '2026-10-20 03:11:03 | root_ghost  | 185.220.101.47 | KEY_OVERRIDE   | BREACH',
-      '2026-10-20 03:12:28 | root_ghost  | 185.220.101.47 | VAULT_EXPORT   | ALERT',
+      '2026-10-20 02:11:04 | operator_01 | 10.14.0.22     | TERMINAL_AUTH       | GRANTED',
+      '2026-10-20 02:28:41 | operator_02 | 10.14.0.31     | ARCHIVE_READ        | GRANTED',
+      '2026-10-20 02:44:19 | sys_backup  | 10.14.0.05     | ARCHIVE_SYNC        | GRANTED',
+      '2026-10-20 03:02:15 | operator_01 | 10.14.0.22     | SESSION_VERIFY      | GRANTED',
+      '2026-10-20 03:11:08 | unknown     | 185.220.101.47 | UNAUTHORIZED_ACCESS | UNAUTHORIZED',
     ].join('\n'),
   };
+}
+
+const SCRAMBLE_GLYPHS = '▓▒░█#@$%&*?!§¤¥±∆0123456789XKVZQWJPMLR';
+
+export function scrambleText(input = '', tick = 0, seed = 17) {
+  const s = String(input ?? '');
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === ' ' || ch === '\n' || ch === '\r' || ch === '\t') {
+      out += ch;
+      continue;
+    }
+    const hBase = (Math.imul(i + 1, 2654435761) ^ Math.imul(s.charCodeAt(i), 2246822519) ^ Math.imul(seed + 1, 374761393)) >>> 0;
+    // Roughly 25% of characters actively cycle each tick to create a live encrypted/scrambled look
+    const changes = (hBase % 4) === 0;
+    const h = changes ? ((hBase ^ Math.imul(tick + 1, 668265263)) >>> 0) : hBase;
+    out += SCRAMBLE_GLYPHS[h % SCRAMBLE_GLYPHS.length];
+  }
+  return out;
 }
 
 export function defaultEmailItem(index = 1) {
   return {
     id: 2000 + index,
     kind: 'email',
-    name: index === 1 ? 'urgent_briefing.eml' : `bericht_0${index}.eml`,
+    name: index === 1 ? 'intercepted_mail_04.eml' : `bericht_0${index}.eml`,
     folder: 'Inbox',
     duration: 6,
-    from: 'Command Center <hq@transmission.local>',
-    to: 'Field Agent <operator@transmission.local>',
-    date: '20 OKT 2026 · 03:15 UTC',
-    subject: 'URGENT: Ongeautoriseerde toegang gedetecteerd',
-    badge: 'TOP SECRET // PRIORITY',
-    attachment: 'access_trace_sector4.dat',
+    scrambled: true,
+    from: 'unknown_node@darknet.relay',
+    to: 'hq_archive@transmission.local',
+    date: '20 OKT 2026 · 03:11 UTC',
+    subject: 'ENCRYPTED // PAYLOAD_STREAM_#409',
+    badge: 'SCRAMBLED // UNREADABLE',
+    attachment: 'cipher_payload_x99.bin',
     body: [
-      'Agent,',
+      'GEHEIME TRANSMISSIE BERICHTGEVING SECTOR 04:',
       '',
-      'Om 03:11 UTC is er een ongeautoriseerde inlog gedetecteerd op node HQ-GATEWAY-04.',
-      'De indringer heeft beveiligde archiefbestanden geopend vanuit een extern IP-adres.',
+      'Alle geautoriseerde sleutels voor de centrale kluis zijn onderschept en gewijzigd door een onbekende gebruiker.',
+      'De oorspronkelijke inhoud van dit bericht is versleuteld met een onbekend protocol en kan niet worden hersteld zonder de juiste decoderingssleutel.',
       '',
-      'OPDRACHT:',
-      '1. Controleer direct het toegangslogboek in de map /ARCHIVE/Logs.',
-      '2. Vergrendel alle actieve sessies en rapporteer je bevindingen.',
+      'SYSTEEM STATUS: DATA STREAM CORRUPTED // LOCKDOWN ACTIVE.',
+      'VERIFICATIE CODE: 884-992-ALPHA-OMEGA-0091',
       '',
-      '— Directie Operaties',
+      '— END OF INTERCEPTED STREAM',
     ].join('\n'),
   };
 }
@@ -99,7 +118,7 @@ export function parseLogEntries(entriesText = '') {
         user: '',
         ip: '',
         action: line,
-        status: /breach|alert|denied|fail|err|warn/i.test(line) ? 'ALERT' : 'INFO',
+        status: /unauth|breach|alert|denied|fail|err|warn/i.test(line) ? 'UNAUTHORIZED' : 'INFO',
         raw: line,
       };
     });
@@ -107,6 +126,9 @@ export function parseLogEntries(entriesText = '') {
 
 function normalizeLogItem(item = {}, index = 0) {
   const def = defaultLogItem(index + 1);
+  const rawEntries = typeof item.entriesText === 'string' && !item.entriesText.includes('root_ghost')
+    ? item.entriesText
+    : def.entriesText;
   return {
     id: Number(item.id) || def.id,
     kind: 'login_log',
@@ -115,7 +137,7 @@ function normalizeLogItem(item = {}, index = 0) {
     duration: Number.isFinite(+item.duration) ? Math.max(0.5, Math.min(60, +item.duration)) : def.duration,
     node: String(item.node ?? def.node).slice(0, 80),
     alert: String(item.alert ?? def.alert).slice(0, 120),
-    entriesText: typeof item.entriesText === 'string' ? item.entriesText : def.entriesText,
+    entriesText: rawEntries,
   };
 }
 
@@ -127,6 +149,7 @@ function normalizeEmailItem(item = {}, index = 0) {
     name: String(item.name || def.name).trim().slice(0, 160) || def.name,
     folder: String(item.folder || def.folder).trim().slice(0, 60) || def.folder,
     duration: Number.isFinite(+item.duration) ? Math.max(0.5, Math.min(60, +item.duration)) : def.duration,
+    scrambled: item.scrambled !== false,
     from: String(item.from ?? def.from).slice(0, 120),
     to: String(item.to ?? def.to).slice(0, 120),
     date: String(item.date ?? def.date).slice(0, 80),

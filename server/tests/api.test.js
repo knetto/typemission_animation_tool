@@ -167,7 +167,7 @@ test('Freesound API configuration and /callback route', async () => {
 });
 
 test('File Terminal variants (images, login_log, email) persist and schedule intro -> explorer -> viewer', async () => {
-  const { normalizeFileOpts, fileSchedule, parseLogEntries } = await import('../../public/js/files/model.js');
+  const { normalizeFileOpts, fileSchedule, parseLogEntries, scrambleText } = await import('../../public/js/files/model.js');
   const pLog = (await json('POST', '/api/projects', { name: 'Log Terminal', type: 'file', file_opts: { variant: 'login_log' } })).body;
   assert.equal(pLog.type, 'file');
   assert.equal(pLog.file_opts.variant, 'login_log');
@@ -181,12 +181,19 @@ test('File Terminal variants (images, login_log, email) persist and schedule int
   assert.equal(logSched.segments[0].folder, 'Logs');
 
   const parsed = parseLogEntries(logOpts.logs[0].entriesText);
-  assert.ok(parsed.length >= 4);
-  assert.ok(parsed.some((e) => e.status === 'BREACH' || e.status === 'DENIED'));
+  assert.equal(parsed.length, 5);
+  assert.ok(!logOpts.logs[0].entriesText.includes('root_ghost'));
+  const unauthEntries = parsed.filter((e) => e.status === 'UNAUTHORIZED');
+  assert.equal(unauthEntries.length, 1);
+  assert.equal(unauthEntries[0].user, 'unknown');
 
   const pMail = (await json('POST', '/api/projects', { name: 'Email Terminal', type: 'file', file_opts: { variant: 'email' } })).body;
   assert.equal(pMail.file_opts.variant, 'email');
   const mailOpts = normalizeFileOpts(pMail.file_opts);
+  assert.equal(mailOpts.emails[0].scrambled, true);
+  const scrambledSample = scrambleText('Geheim bericht voor agent', 1, 10);
+  assert.equal(scrambledSample.length, 'Geheim bericht voor agent'.length);
+  assert.NotEqual?.(scrambledSample, 'Geheim bericht voor agent');
   const mailSched = fileSchedule([], mailOpts);
   assert.ok(mailSched.intro > 4);
   assert.equal(mailSched.segments.length, 1);
