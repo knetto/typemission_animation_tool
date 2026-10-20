@@ -71,7 +71,8 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     const name = String(req.body?.name || 'Nieuw project').slice(0, 120);
     const scene = ['transmission', 'urgent', 'ai'].includes(req.body?.scene) ? req.body.scene : 'transmission';
     const type = ['audio', 'file', 'keyboard'].includes(req.body?.type) ? req.body.type : 'audio';
-    const info = db.prepare('INSERT INTO projects (name, scene, type) VALUES (?, ?, ?)').run(name, scene, type);
+    const fileOpts = req.body?.file_opts && typeof req.body.file_opts === 'object' ? JSON.stringify(req.body.file_opts) : '{}';
+    const info = db.prepare('INSERT INTO projects (name, scene, type, file_opts) VALUES (?, ?, ?, ?)').run(name, scene, type, fileOpts);
     res.status(201).json(parseProject(db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid)));
   });
 

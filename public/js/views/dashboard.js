@@ -13,21 +13,55 @@ const SCENE_COLOR = { transmission: '#3b8fe0', urgent: '#ff3b3b', ai: '#8b5cf6' 
 
 function newProjectDialog() {
   return new Promise((resolve) => {
-    let type = 'audio', busy = false;
+    let type = 'audio', fileVariant = 'images', busy = false;
     const name = h('input', { class: 'input', id: 'new-project-name', placeholder: 'Bijv. Missie 3 – briefing', maxlength: 120, required: true });
     const choices = h('div', { class: 'project-type-choices', role: 'group', 'aria-label': 'Projecttype' });
+    const variantSection = h('div', { class: 'file-variant-picker', hidden: true });
+    const variantBtns = [
+      ['images', 'Afbeeldingen', 'Inlog → File Explorer → Open afbeeldingen.', 'folder'],
+      ['login_log', 'Inlog Log', 'Inlog → File Explorer → Open systeem-/inloglogboek.', 'log'],
+      ['email', 'E-mail', 'Inlog → File Explorer → Open onderschept e-mailbericht.', 'mail'],
+    ].map(([vKey, vLabel, vDesc, vIco]) => h('button', {
+      type: 'button',
+      class: `project-type-choice file-variant-choice${vKey === fileVariant ? ' on' : ''}`,
+      'aria-pressed': String(vKey === fileVariant),
+      'data-variant': vKey,
+      onclick: () => {
+        fileVariant = vKey;
+        variantBtns.forEach((b) => {
+          b.classList.toggle('on', b.dataset.variant === fileVariant);
+          b.setAttribute('aria-pressed', String(b.dataset.variant === fileVariant));
+        });
+      }
+    }, icon(vIco), h('b', {}, vLabel), h('span', {}, vDesc)));
+    variantSection.append(
+      h('p', { class: 'muted', style: { margin: '0 0 10px', fontSize: '13px' } }, 'Kies je File Terminal variant (begint altijd met een terminal-inlog → File Explorer):'),
+      h('div', { class: 'project-type-choices', style: { margin: '0 0 18px' } }, ...variantBtns)
+    );
+
     const buttons = [
       ['audio', 'Audio Terminal', 'Neem je stem op, bewerk audio en kies een videoscène.', 'wave'],
-      ['file', 'File Terminal', 'Open afbeeldingen in een geanimeerde bestandsverkenner.', 'folder'],
+      ['file', 'File Terminal', 'Inlog + File Explorer met Afbeeldingen, Inlog Log of E-mail.', 'folder'],
       ['keyboard', 'Toetsenbord Stickers', 'Kies QWERTY, AZERTY of QWERTZ en exporteer een sticker-animatie per toets.', 'keyboard'],
     ].map(([key, label, desc, ico]) => h('button', {
       type: 'button', class: `project-type-choice${key === type ? ' on' : ''}`, 'aria-pressed': String(key === type), 'data-type': key,
-      onclick: () => { type = key; buttons.forEach((b) => { b.classList.toggle('on', b.dataset.type === type); b.setAttribute('aria-pressed', String(b.dataset.type === type)); }); }
+      onclick: () => {
+        type = key;
+        buttons.forEach((b) => { b.classList.toggle('on', b.dataset.type === type); b.setAttribute('aria-pressed', String(b.dataset.type === type)); });
+        variantSection.hidden = type !== 'file';
+      }
     }, icon(ico), h('b', {}, label), h('span', {}, desc)));
     choices.append(...buttons);
     const close = (data) => { if (busy) return; busy = true; dialog.close(); dialog.remove(); resolve(data); };
-    const form = h('form', { onsubmit: (e) => { e.preventDefault(); close({ name: name.value.trim() || 'Nieuw project', type }); } },
-      h('h2', {}, 'Nieuw project'), h('p', { class: 'muted' }, 'Wat wil je maken?'), choices,
+    const form = h('form', {
+      onsubmit: (e) => {
+        e.preventDefault();
+        const payload = { name: name.value.trim() || 'Nieuw project', type };
+        if (type === 'file') payload.file_opts = { variant: fileVariant };
+        close(payload);
+      }
+    },
+      h('h2', {}, 'Nieuw project'), h('p', { class: 'muted' }, 'Wat wil je maken?'), choices, variantSection,
       h('label', { class: 'field' }, 'Projectnaam', name), h('div', { class: 'modal-actions' },
         h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => close(null) }, 'Annuleren'),
         h('button', { class: 'btn btn-primary', type: 'submit' }, 'Aanmaken')));
@@ -89,7 +123,13 @@ export async function mount(root, { tab = 'projects' } = {}) {
     const thumb = h('div', { class: `card-thumb ${p.scene}`, style: { color }, html: logoSvg('currentColor') });
     const bars = h('div', { class: 'bars' }, ...Array.from({ length: 13 }, (_, k) => h('i', { style: { '--k': k } })));
     thumb.append(bars);
-    if (p.type === 'file') { thumb.replaceChildren(icon('folder'), h('span', { class: 'file-project-label' }, '> FILE TERMINAL')); thumb.classList.add('file-project-thumb'); }
+    const fileVariant = p.file_opts?.variant || 'images';
+    if (p.type === 'file') {
+      const fIco = fileVariant === 'login_log' ? 'log' : fileVariant === 'email' ? 'mail' : 'folder';
+      const fLabel = fileVariant === 'login_log' ? '> LOGIN LOG' : fileVariant === 'email' ? '> EMAIL TERMINAL' : '> FILE TERMINAL';
+      thumb.replaceChildren(icon(fIco), h('span', { class: 'file-project-label' }, fLabel));
+      thumb.classList.add('file-project-thumb');
+    }
     if (p.type === 'keyboard') {
       const sw = ['#f43f5e', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6'].map((c) => h('i', { style: { background: c } }));
       thumb.replaceChildren(icon('keyboard'), h('div', { class: 'kb-thumb-dots' }, ...sw), h('span', { class: 'file-project-label' }, '⌨ KEYBOARD STICKERS'));
@@ -97,6 +137,11 @@ export async function mount(root, { tab = 'projects' } = {}) {
     }
     const kbLayout = (p.keyboard_opts?.layout || 'qwerty').toUpperCase();
     const kbCount = Array.isArray(p.keyboard_opts?.selectedKeys) ? p.keyboard_opts.selectedKeys.length : 26;
+    const fileSub = fileVariant === 'login_log'
+      ? `Inlog Log (${Array.isArray(p.file_opts?.logs) ? p.file_opts.logs.length : 1})`
+      : fileVariant === 'email'
+        ? `E-mail (${Array.isArray(p.file_opts?.emails) ? p.file_opts.emails.length : 1})`
+        : `${p.image_count} afbeeldingen`;
     const card = h('article', { class: 'card glass', id: `project-${p.id}`, style: { '--i': i }, onclick: () => (location.hash = `#/project/${p.id}`) },
       h('div', { class: 'card-actions' },
         h('button', { class: 'btn btn-sm btn-icon', title: 'Hernoemen', onclick: (e) => { e.stopPropagation(); rename(p); } }, icon('edit')),
@@ -106,7 +151,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
       h('h3', {}, p.name),
       h('div', { class: 'card-meta' },
         h('span', {}, p.type === 'keyboard' ? 'Toetsenbord Stickers' : p.type === 'file' ? 'File Terminal' : 'Audio Terminal'),
-        h('span', {}, p.type === 'keyboard' ? `${kbLayout} · ${kbCount} toetsen` : p.type === 'file' ? `${p.image_count} afbeeldingen` : `${p.asset_count} audio`),
+        h('span', {}, p.type === 'keyboard' ? `${kbLayout} · ${kbCount} toetsen` : p.type === 'file' ? fileSub : `${p.asset_count} audio`),
         p.export_count ? h('span', {}, `🎞 ${p.export_count}`) : null,
         p.duration ? h('span', {}, fmtTime(p.duration)) : null),
       h('div', { class: 'card-meta', style: { marginTop: '6px', fontSize: '12px' } }, h('span', {}, 'Bewerkt ' + fmtDate(p.updated_at))));

@@ -1,28 +1,187 @@
-// Pure sequence model: image hold times exclude navigation and closing animations.
+// Pure sequence model: item hold times exclude navigation and closing animations.
+// Supports 3 File Terminal variants: 'images', 'login_log', and 'email'.
 export const FILE_THEMES = {
-  green: { name: 'Hacker · black & green', bg: '#020905', panel: '#06150c', bar: '#113b23', ink: '#a8ffc4', muted: '#65a780', accent: '#56ff91', border: '#25633d', selected: '#164b2b' },
-  blue: { name: 'Classic · blue & white', bg: '#000080', panel: '#0000a0', bar: '#c4c4cc', ink: '#ffffff', muted: '#b9c3f2', accent: '#ffffff', border: '#b9c3f2', selected: '#2449cf' },
+  green: { name: 'Hacker · black & green', bg: '#020905', panel: '#06150c', bar: '#113b23', ink: '#a8ffc4', muted: '#65a780', accent: '#56ff91', border: '#25633d', selected: '#164b2b', warn: '#ff6b6b', warnBg: '#3a0d12' },
+  blue: { name: 'Classic · blue & white', bg: '#000080', panel: '#0000a0', bar: '#c4c4cc', ink: '#ffffff', muted: '#b9c3f2', accent: '#ffffff', border: '#b9c3f2', selected: '#2449cf', warn: '#ffdf6b', warnBg: '#5a1830' },
 };
 
-export function normalizeFileOpts(opts = {}) {
+export const FILE_VARIANTS = {
+  images: {
+    id: 'images',
+    name: 'Afbeeldingen',
+    short: 'Afbeeldingen',
+    desc: 'Inlog → File Explorer → Open afbeeldingen',
+    icon: 'folder',
+  },
+  login_log: {
+    id: 'login_log',
+    name: 'Inlog Log',
+    short: 'Inlog Log',
+    desc: 'Inlog → File Explorer → Open inlog-/systeemlogboek',
+    icon: 'log',
+  },
+  email: {
+    id: 'email',
+    name: 'E-mail',
+    short: 'E-mail',
+    desc: 'Inlog → File Explorer → Open onderschepte e-mail',
+    icon: 'mail',
+  },
+};
+
+export function defaultLogItem(index = 1) {
   return {
+    id: 1000 + index,
+    kind: 'login_log',
+    name: index === 1 ? 'auth_access_log.txt' : `security_log_0${index}.txt`,
+    folder: 'Logs',
+    duration: 5,
+    node: 'NODE: HQ-GATEWAY-04',
+    alert: 'SECURITY ALERT: UNAUTHORIZED LOGIN DETECTED',
+    entriesText: [
+      '2026-10-20 02:11:04 | operator_01 | 10.14.0.22     | TERMINAL_AUTH  | GRANTED',
+      '2026-10-20 02:44:19 | sys_backup  | 10.14.0.05     | ARCHIVE_SYNC   | GRANTED',
+      '2026-10-20 03:08:51 | unknown     | 185.220.101.47 | SSH_LOGIN      | DENIED',
+      '2026-10-20 03:09:12 | unknown     | 185.220.101.47 | BRUTE_FORCE    | DENIED',
+      '2026-10-20 03:11:03 | root_ghost  | 185.220.101.47 | KEY_OVERRIDE   | BREACH',
+      '2026-10-20 03:12:28 | root_ghost  | 185.220.101.47 | VAULT_EXPORT   | ALERT',
+    ].join('\n'),
+  };
+}
+
+export function defaultEmailItem(index = 1) {
+  return {
+    id: 2000 + index,
+    kind: 'email',
+    name: index === 1 ? 'urgent_briefing.eml' : `bericht_0${index}.eml`,
+    folder: 'Inbox',
+    duration: 6,
+    from: 'Command Center <hq@transmission.local>',
+    to: 'Field Agent <operator@transmission.local>',
+    date: '20 OKT 2026 · 03:15 UTC',
+    subject: 'URGENT: Ongeautoriseerde toegang gedetecteerd',
+    badge: 'TOP SECRET // PRIORITY',
+    attachment: 'access_trace_sector4.dat',
+    body: [
+      'Agent,',
+      '',
+      'Om 03:11 UTC is er een ongeautoriseerde inlog gedetecteerd op node HQ-GATEWAY-04.',
+      'De indringer heeft beveiligde archiefbestanden geopend vanuit een extern IP-adres.',
+      '',
+      'OPDRACHT:',
+      '1. Controleer direct het toegangslogboek in de map /ARCHIVE/Logs.',
+      '2. Vergrendel alle actieve sessies en rapporteer je bevindingen.',
+      '',
+      '— Directie Operaties',
+    ].join('\n'),
+  };
+}
+
+export function parseLogEntries(entriesText = '') {
+  return String(entriesText || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      if (line.includes('|')) {
+        const parts = line.split('|').map((p) => p.trim());
+        return {
+          time: parts[0] || '',
+          user: parts[1] || '-',
+          ip: parts[2] || '-',
+          action: parts[3] || '-',
+          status: (parts[4] || 'INFO').toUpperCase(),
+          raw: null,
+        };
+      }
+      return {
+        time: '',
+        user: '',
+        ip: '',
+        action: line,
+        status: /breach|alert|denied|fail|err|warn/i.test(line) ? 'ALERT' : 'INFO',
+        raw: line,
+      };
+    });
+}
+
+function normalizeLogItem(item = {}, index = 0) {
+  const def = defaultLogItem(index + 1);
+  return {
+    id: Number(item.id) || def.id,
+    kind: 'login_log',
+    name: String(item.name || def.name).trim().slice(0, 160) || def.name,
+    folder: String(item.folder || def.folder).trim().slice(0, 60) || def.folder,
+    duration: Number.isFinite(+item.duration) ? Math.max(0.5, Math.min(60, +item.duration)) : def.duration,
+    node: String(item.node ?? def.node).slice(0, 80),
+    alert: String(item.alert ?? def.alert).slice(0, 120),
+    entriesText: typeof item.entriesText === 'string' ? item.entriesText : def.entriesText,
+  };
+}
+
+function normalizeEmailItem(item = {}, index = 0) {
+  const def = defaultEmailItem(index + 1);
+  return {
+    id: Number(item.id) || def.id,
+    kind: 'email',
+    name: String(item.name || def.name).trim().slice(0, 160) || def.name,
+    folder: String(item.folder || def.folder).trim().slice(0, 60) || def.folder,
+    duration: Number.isFinite(+item.duration) ? Math.max(0.5, Math.min(60, +item.duration)) : def.duration,
+    from: String(item.from ?? def.from).slice(0, 120),
+    to: String(item.to ?? def.to).slice(0, 120),
+    date: String(item.date ?? def.date).slice(0, 80),
+    subject: String(item.subject ?? def.subject).slice(0, 140),
+    badge: String(item.badge ?? def.badge).slice(0, 60),
+    attachment: String(item.attachment ?? def.attachment).slice(0, 100),
+    body: typeof item.body === 'string' ? item.body : def.body,
+  };
+}
+
+export function normalizeFileOpts(opts = {}) {
+  const variant = ['images', 'login_log', 'email'].includes(opts.variant) ? opts.variant : 'images';
+  const defaultFolder = variant === 'login_log' ? 'Logs' : variant === 'email' ? 'Inbox' : (Array.isArray(opts.folders) && opts.folders.includes('Bestanden') ? 'Bestanden' : 'Files');
+  const rawFolders = Array.isArray(opts.folders)
+    ? opts.folders.filter((f) => typeof f === 'string').map((f) => f.trim().slice(0, 60)).filter(Boolean)
+    : [];
+  const logs = Array.isArray(opts.logs) && opts.logs.length
+    ? opts.logs.map(normalizeLogItem)
+    : [defaultLogItem(1)];
+  const emails = Array.isArray(opts.emails) && opts.emails.length
+    ? opts.emails.map(normalizeEmailItem)
+    : [defaultEmailItem(1)];
+
+  return {
+    variant,
     theme: opts.theme === 'blue' ? 'blue' : 'green',
     pace: Number.isFinite(opts.pace) ? Math.max(0.7, Math.min(1.5, opts.pace)) : 1,
-    intro: opts.intro !== false, outro: opts.outro === true, sounds: opts.sounds !== false,
+    intro: opts.intro !== false,
+    outro: opts.outro === true,
+    sounds: opts.sounds !== false,
     motionSeed: Number.isFinite(opts.motionSeed) ? opts.motionSeed >>> 0 : 41763,
     volume: Number.isFinite(opts.volume) ? Math.max(0, Math.min(1, opts.volume)) : 0.65,
     username: String(opts.username || 'operator').slice(0, 30),
     title: String(opts.title || 'CLASSIFIED FILE ARCHIVE').slice(0, 70),
-    folders: [...new Set([Array.isArray(opts.folders) && opts.folders.includes('Bestanden') ? 'Bestanden' : 'Files', ...(Array.isArray(opts.folders) ? opts.folders.filter((f) => typeof f === 'string').map((f) => f.trim().slice(0, 60)).filter(Boolean) : [])])],
+    folders: [...new Set([defaultFolder, ...rawFolders])],
+    logs,
+    emails,
   };
+}
+
+export function getActiveFileItems(images = [], options = {}) {
+  const opts = normalizeFileOpts(options);
+  if (opts.variant === 'login_log') return opts.logs;
+  if (opts.variant === 'email') return opts.emails;
+  return images || [];
 }
 
 export function fileSchedule(images, options = {}) {
   const opts = normalizeFileOpts(options);
-  const intro = opts.intro ? 4.6 + images.length * 0.22 : 0;
+  const items = getActiveFileItems(images, opts);
+  const defaultFolder = opts.variant === 'login_log' ? 'Logs' : opts.variant === 'email' ? 'Inbox' : 'Files';
+  const intro = opts.intro ? 4.6 + items.length * 0.22 : 0;
   let cursor = intro, previous = null;
-  const segments = images.map((image, index) => {
-    const folder = image.folder || 'Files', folderChanged = previous !== folder;
+  const segments = items.map((image, index) => {
+    const folder = image.folder || defaultFolder, folderChanged = previous !== folder;
     const pace = opts.pace;
     const folderArrive = cursor + 0.9 * pace, folderClick = cursor + 1.25 * pace, folderOpen = cursor + 1.45 * pace;
     const fileMove = folderChanged ? folderOpen + 0.18 * pace : cursor + 0.1 * pace;
@@ -32,18 +191,18 @@ export function fileSchedule(images, options = {}) {
     const hold = Number.isFinite(image.duration) ? Math.max(0.5, Math.min(60, image.duration)) : 3;
     const close = open + hold, closeArrive = close + 0.7 * pace, closeClick = close + 0.98 * pace;
     const motionSeed = (opts.motionSeed ^ Math.imul(index + 1, 2654435761) ^ Math.imul(Number(image.id) || 0, 2246822519)) >>> 0;
-    const segment = { image, folder, folderChanged, motionSeed, start: cursor, folderArrive, folderClick, folderOpen, fileMove, fileArrive, fileClick, fileDoubleClick, open, close, closeArrive, closeClick, end: close + 1.25 * pace, hold, pace };
+    const segment = { image, item: image, folder, folderChanged, motionSeed, start: cursor, folderArrive, folderClick, folderOpen, fileMove, fileArrive, fileClick, fileDoubleClick, open, close, closeArrive, closeClick, end: close + 1.25 * pace, hold, pace };
     cursor = segment.end; previous = folder;
     return segment;
   });
   const terminal = cursor + 1.4 * opts.pace;
-  const outro = opts.outro && images.length ? {
+  const outro = opts.outro && items.length ? {
     start: cursor, arrive: cursor + 0.85 * opts.pace, click: cursor + 1.2 * opts.pace,
     terminal, logout: terminal + 0.4, loggedOut: terminal + 1.8,
     clear: terminal + 2.6, blank: terminal + 3.5, end: terminal + 4.8,
     motionSeed: opts.motionSeed, pace: opts.pace,
   } : null;
-  return { intro, segments, outro, total: outro ? outro.end : cursor + (images.length ? 0.8 : 0) };
+  return { intro, segments, outro, total: outro ? outro.end : cursor + (items.length ? 0.8 : 0) };
 }
 
 export const displayFileFolder = (name) => name === 'Bestanden' ? 'Files' : name;
@@ -67,6 +226,13 @@ export function fileSoundEvents(schedule, opts) {
   schedule.segments.forEach((s) => {
     if (s.folderChanged) events.push({ at: s.folderClick, kind: 'click' }, { at: s.folderOpen, kind: 'folder' });
     events.push({ at: s.fileClick, kind: 'click' }, { at: s.fileDoubleClick, kind: 'click' }, { at: s.open, kind: 'open' }, { at: s.closeClick, kind: 'click' });
+    if (opts?.variant === 'login_log' || opts?.variant === 'email') {
+      const ticks = opts.variant === 'login_log' ? 6 : 8;
+      for (let i = 0; i < ticks; i++) {
+        const tickAt = s.open + 0.14 + i * 0.11;
+        if (tickAt < s.close - 0.15) events.push({ at: tickAt, kind: 'key' });
+      }
+    }
   });
   if (schedule.outro) {
     const o = schedule.outro;
