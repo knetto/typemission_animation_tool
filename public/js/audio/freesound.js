@@ -18,9 +18,10 @@ const QUICK_CATEGORIES = [
 // Fix typo in whoosh query
 QUICK_CATEGORIES[4].q = 'whoosh swipe transition';
 
-export function createFreesoundBrowser({ onImported, getFolders, startExpanded = false } = {}) {
+export function createFreesoundBrowser({ onImported, getFolders, startExpanded = true } = {}) {
   let status = { configured: false, hasKey: false, hasClientId: false, oauthConnected: false, clientId: '', callbackUrl: 'http://localhost:3000/callback', authorizeUrl: null };
-  let showConfig = false;
+  let showConfig = true;
+  let showSecret = false;
   let expanded = startExpanded;
   let activeCategory = '';
   let currentPage = 1;
@@ -83,17 +84,34 @@ export function createFreesoundBrowser({ onImported, getFolders, startExpanded =
   // Config drawer
   const clientIdIn = h('input', {
     class: 'input',
+    id: 'fs-client-id',
     type: 'text',
-    placeholder: 'Bijv. a1b2c3d4e5f6… (Client ID)',
+    placeholder: 'Plak je Freesound Client ID…',
     autocomplete: 'off',
   });
   const apiKeyIn = h('input', {
     class: 'input',
+    id: 'fs-api-key',
     type: 'password',
     placeholder: 'Plak je Freesound Client Secret / API Key…',
     autocomplete: 'off',
   });
-  const configWrap = h('div', { class: 'fs-config-card' });
+  const toggleSecretBtn = h('button', {
+    class: 'btn btn-sm btn-ghost fs-secret-toggle',
+    type: 'button',
+    onclick: () => {
+      showSecret = !showSecret;
+      apiKeyIn.type = showSecret ? 'text' : 'password';
+      toggleSecretBtn.textContent = showSecret ? 'Verberg' : 'Toon';
+    }
+  }, 'Toon');
+  const configWrap = h('form', {
+    class: 'fs-config-card',
+    onsubmit: (e) => {
+      e.preventDefault();
+      saveConfigNow();
+    }
+  });
 
   // Search controls
   const searchIn = h('input', {
@@ -165,11 +183,35 @@ export function createFreesoundBrowser({ onImported, getFolders, startExpanded =
     doSearch(1);
   }
 
+  async function saveConfigNow() {
+    const clientId = clientIdIn.value.trim();
+    const apiKey = apiKeyIn.value.trim();
+    if (!apiKey && !status.hasKey && !clientId) {
+      return toast('Vul je Freesound Client ID en/of Client Secret (API Key) in', 'err');
+    }
+    try {
+      const payload = { clientId };
+      if (apiKey) payload.apiKey = apiKey;
+      status = await api.freesoundSaveConfig(payload);
+      apiKeyIn.value = '';
+      apiKeyIn.placeholder = status.hasKey ? '•••••••••••••••••••••••• (Opgeslagen — plak om te wijzigen)' : 'Plak je Freesound Client Secret / API Key…';
+      toast('Freesound Client ID & API Key opgeslagen!', 'ok');
+      render();
+      if (status.configured && !results.length) selectQuickCategory(QUICK_CATEGORIES[0]);
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+  }
+
   async function refreshStatus() {
     try {
       status = await api.freesoundStatus();
       if (status.clientId && !clientIdIn.value) clientIdIn.value = status.clientId;
-      if (!status.configured) showConfig = true;
+      apiKeyIn.placeholder = status.hasKey ? '•••••••••••••••••••••••• (Opgeslagen — plak om te wijzigen)' : 'Plak je Freesound Client Secret / API Key…';
+      if (!status.configured) {
+        showConfig = true;
+        expanded = true;
+      }
       render();
       if (expanded && status.configured && !results.length && !loading) {
         selectQuickCategory(QUICK_CATEGORIES[0]);
@@ -281,38 +323,19 @@ export function createFreesoundBrowser({ onImported, getFolders, startExpanded =
       ),
       h('div', { class: 'fs-config-grid' },
         h('label', { class: 'field' },
-          h('span', { class: 'field-label' }, 'Client ID (voor OAuth2)'),
+          h('span', { class: 'field-label' }, 'Client ID'),
           clientIdIn
         ),
         h('label', { class: 'field' },
           h('span', { class: 'field-label' }, 'Client Secret / API Key ', status.hasKey ? h('small', { class: 'fs-saved-tag' }, '(opgeslagen)') : null),
-          apiKeyIn
+          h('div', { class: 'fs-secret-input-wrap' }, apiKeyIn, toggleSecretBtn)
         )
       ),
       h('div', { class: 'fs-config-actions' },
         h('button', {
           class: 'btn btn-primary btn-sm',
-          type: 'button',
-          onclick: async () => {
-            const clientId = clientIdIn.value.trim();
-            const apiKey = apiKeyIn.value.trim();
-            if (!apiKey && !status.hasKey && !clientId) {
-              return toast('Vul je Freesound API Key (Client Secret) in', 'err');
-            }
-            try {
-              const payload = { clientId };
-              if (apiKey) payload.apiKey = apiKey;
-              status = await api.freesoundSaveConfig(payload);
-              apiKeyIn.value = '';
-              toast('Freesound API-instellingen opgeslagen!', 'ok');
-              showConfig = false;
-              render();
-              if (!results.length) selectQuickCategory(QUICK_CATEGORIES[0]);
-            } catch (e) {
-              toast(e.message, 'err');
-            }
-          }
-        }, 'Instellingen opslaan'),
+          type: 'submit',
+        }, 'Client ID & API Key opslaan'),
         h('button', {
           class: 'btn btn-sm',
           type: 'button',
@@ -325,6 +348,8 @@ export function createFreesoundBrowser({ onImported, getFolders, startExpanded =
               if (apiKey) payload.apiKey = apiKey;
               status = await api.freesoundSaveConfig(payload);
               apiKeyIn.value = '';
+              apiKeyIn.placeholder = status.hasKey ? '•••••••••••••••••••••••• (Opgeslagen — plak om te wijzigen)' : 'Plak je Freesound Client Secret / API Key…';
+              render();
             }
             if (!status.hasClientId || !status.hasKey) {
               return toast('Vul zowel Client ID als Client Secret / API Key in om OAuth2 te starten', 'info');
@@ -341,6 +366,7 @@ export function createFreesoundBrowser({ onImported, getFolders, startExpanded =
             status = await api.freesoundDisconnect(true);
             clientIdIn.value = '';
             apiKeyIn.value = '';
+            apiKeyIn.placeholder = 'Plak je Freesound Client Secret / API Key…';
             results = [];
             toast('Freesound API ontkoppeld', 'info');
             render();
