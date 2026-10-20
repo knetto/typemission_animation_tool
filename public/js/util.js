@@ -2,6 +2,223 @@
 export const $ = (s, root = document) => root.querySelector(s);
 export const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 
+let activeSelectMenu = null;
+let activeSelectEl = null;
+let activeSelectCleanup = null;
+
+export function closeCustomSelect() {
+  if (activeSelectCleanup) {
+    const fn = activeSelectCleanup;
+    activeSelectCleanup = null;
+    fn();
+  }
+}
+
+function openCustomSelect(selectEl) {
+  closeCustomSelect();
+  if (!selectEl || selectEl.disabled) return;
+
+  const menu = document.createElement('div');
+  menu.className = 'cselect-menu';
+  menu.setAttribute('role', 'listbox');
+  try { menu.setAttribute('popover', 'manual'); } catch {}
+
+  const optionButtons = [];
+  let activeIndex = -1;
+
+  const setHighlight = (idx) => {
+    if (!optionButtons.length) return;
+    activeIndex = ((idx % optionButtons.length) + optionButtons.length) % optionButtons.length;
+    optionButtons.forEach((b, i) => b.classList.toggle('focused', i === activeIndex));
+    optionButtons[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  };
+
+  const chooseOption = (opt) => {
+    if (!opt || opt.disabled) return;
+    const changed = selectEl.value !== opt.value;
+    selectEl.value = opt.value;
+    opt.selected = true;
+    closeCustomSelect();
+    if (changed) {
+      selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+      selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
+  const addOptionBtn = (opt) => {
+    const isSelected = opt.value === selectEl.value;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `cselect-item${isSelected ? ' selected' : ''}`;
+    btn.disabled = Boolean(opt.disabled);
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-selected', String(isSelected));
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'cselect-item-label';
+    labelSpan.textContent = opt.textContent;
+    btn.append(labelSpan);
+
+    if (isSelected) {
+      const checkSpan = document.createElement('span');
+      checkSpan.className = 'cselect-item-check';
+      checkSpan.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      btn.append(checkSpan);
+    }
+
+    const idx = optionButtons.length;
+    optionButtons.push(btn);
+    if (isSelected && activeIndex === -1) activeIndex = idx;
+
+    btn.addEventListener('pointerenter', () => {
+      activeIndex = idx;
+      optionButtons.forEach((b, i) => b.classList.toggle('focused', i === activeIndex));
+    });
+    btn.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      chooseOption(opt);
+    });
+
+    menu.append(btn);
+  };
+
+  let hasContent = false;
+  for (const child of selectEl.children) {
+    if (child.tagName === 'OPTGROUP') {
+      if (hasContent) {
+        const sep = document.createElement('div');
+        sep.className = 'cselect-sep';
+        menu.append(sep);
+      }
+      if (child.label) {
+        const hdr = document.createElement('div');
+        hdr.className = 'cselect-group-title';
+        hdr.textContent = child.label;
+        menu.append(hdr);
+      }
+      for (const opt of child.children) {
+        if (opt.tagName === 'OPTION') {
+          addOptionBtn(opt);
+          hasContent = true;
+        }
+      }
+    } else if (child.tagName === 'OPTION') {
+      addOptionBtn(child);
+      hasContent = true;
+    }
+  }
+
+  const host = selectEl.closest('dialog') || document.body;
+  host.append(menu);
+  try { menu.showPopover?.(); } catch {}
+
+  selectEl.classList.add('cselect-open');
+  activeSelectMenu = menu;
+  activeSelectEl = selectEl;
+
+  const rect = selectEl.getBoundingClientRect();
+  const minW = Math.max(rect.width, 188);
+  menu.style.minWidth = `${Math.round(minW)}px`;
+  menu.style.maxWidth = `${Math.max(Math.round(rect.width), 280)}px`;
+
+  const menuRect = menu.getBoundingClientRect();
+  const menuW = menuRect.width || minW;
+  const menuH = Math.min(menu.scrollHeight + 12, 310);
+
+  let top = rect.bottom + 6;
+  if (top + menuH > window.innerHeight - 10 && rect.top > menuH + 12) {
+    top = rect.top - menuH - 6;
+  }
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - menuW - 8));
+  menu.style.left = `${Math.round(left)}px`;
+  menu.style.top = `${Math.round(top)}px`;
+
+  if (activeIndex >= 0) {
+    optionButtons[activeIndex]?.classList.add('focused');
+    optionButtons[activeIndex]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  const onDocPointerDown = (e) => {
+    if (menu.contains(e.target) || selectEl.contains(e.target)) return;
+    closeCustomSelect();
+  };
+  const onScroll = (e) => {
+    if (menu.contains(e.target)) return;
+    closeCustomSelect();
+  };
+  const onResize = () => closeCustomSelect();
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeCustomSelect();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight(activeIndex + 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight(activeIndex - 1);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (activeIndex >= 0 && optionButtons[activeIndex]) {
+        optionButtons[activeIndex].click();
+      } else {
+        closeCustomSelect();
+      }
+    } else if (e.key === 'Tab') {
+      closeCustomSelect();
+    }
+  };
+
+  window.addEventListener('pointerdown', onDocPointerDown, true);
+  window.addEventListener('scroll', onScroll, true);
+  window.addEventListener('resize', onResize);
+  window.addEventListener('keydown', onKeyDown, true);
+
+  activeSelectCleanup = () => {
+    window.removeEventListener('pointerdown', onDocPointerDown, true);
+    window.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('resize', onResize);
+    window.removeEventListener('keydown', onKeyDown, true);
+    selectEl.classList.remove('cselect-open');
+    try { menu.hidePopover?.(); } catch {}
+    menu.remove();
+    if (activeSelectMenu === menu) activeSelectMenu = null;
+    if (activeSelectEl === selectEl) activeSelectEl = null;
+  };
+}
+
+export function initCustomSelect(selectEl) {
+  if (!selectEl || selectEl.dataset.cselectInit) return selectEl;
+  selectEl.dataset.cselectInit = '1';
+
+  selectEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || selectEl.disabled) return;
+    e.preventDefault();
+    selectEl.focus({ preventScroll: true });
+    if (activeSelectEl === selectEl) {
+      closeCustomSelect();
+    } else {
+      openCustomSelect(selectEl);
+    }
+  });
+
+  selectEl.addEventListener('keydown', (e) => {
+    if (selectEl.disabled) return;
+    if ((e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') && activeSelectEl !== selectEl) {
+      e.preventDefault();
+      openCustomSelect(selectEl);
+    }
+  });
+
+  return selectEl;
+}
+
 export function syncRangeFill(el) {
   if (!el || el.type !== 'range') return;
   const min = el.min !== '' && Number.isFinite(+el.min) ? +el.min : 0;
@@ -47,6 +264,9 @@ export function h(tag, attrs = {}, ...children) {
   for (const c of children.flat()) {
     if (c === null || c === undefined || c === false) continue;
     el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+  if (el.tagName === 'SELECT') {
+    initCustomSelect(el);
   }
   return el;
 }
