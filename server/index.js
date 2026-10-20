@@ -226,6 +226,295 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     res.status(204).end();
   });
 
+  // ---------- Freesound API v2 & OAuth2 Callback (http://localhost:3000/callback) ----------
+  const FREESOUND_CALLBACK_URL = 'http://localhost:3000/callback';
+
+  function getFreesoundConfig() {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'freesound'").get();
+    let saved = {};
+    if (row?.value) {
+      try { saved = JSON.parse(row.value); } catch {}
+    }
+    return {
+      clientId: saved.clientId || process.env.FREESOUND_CLIENT_ID || '',
+      apiKey: saved.apiKey || process.env.FREESOUND_API_KEY || process.env.FREESOUND_CLIENT_SECRET || '',
+      accessToken: saved.accessToken || '',
+      refreshToken: saved.refreshToken || '',
+      expiresAt: Number(saved.expiresAt) || 0,
+    };
+  }
+
+  function saveFreesoundConfig(patch) {
+    const next = { ...getFreesoundConfig(), ...patch };
+    db.prepare("INSERT INTO settings (key, value) VALUES ('freesound', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run(JSON.stringify(next));
+    return next;
+  }
+
+  function buildFreesoundStatus(cfg = getFreesoundConfig()) {
+    const hasKey = Boolean(cfg.apiKey?.trim());
+    const hasClientId = Boolean(cfg.clientId?.trim());
+    const oauthConnected = Boolean(cfg.accessToken);
+    const authorizeUrl = hasClientId
+      ? `https://freesound.org/apiv2/oauth2/authorize/?client_id=${encodeURIComponent(cfg.clientId.trim())}&response_type=code`
+      : '';
+    return {
+      configured: hasKey || oauthConnected,
+      hasKey,
+      hasClientId,
+      oauthConnected,
+      clientId: cfg.clientId || '',
+      callbackUrl: FREESOUND_CALLBACK_URL,
+      authorizeUrl,
+    };
+  }
+
+  async function getFreesoundAuthHeader() {
+    let cfg = getFreesoundConfig();
+    if (cfg.accessToken) {
+      if (cfg.expiresAt && Date.now() > cfg.expiresAt - 30000 && cfg.refreshToken && cfg.clientId && cfg.apiKey) {
+        try {
+          const body = new URLSearchParams({
+            client_id: cfg.clientId,
+            client_secret: cfg.apiKey,
+            grant_type: 'refresh_token',
+            refresh_token: cfg.refreshToken,
+          });
+          const r = await fetch('https://freesound.org/apiv2/oauth2/access_token/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body,
+          });
+          if (r.ok) {
+            const data = await r.json();
+            cfg = saveFreesoundConfig({
+              accessToken: data.access_token || '',
+              refreshToken: data.refresh_token || cfg.refreshToken,
+              expiresAt: Date.now() + (Number(data.expires_in) || 86400) * 1000,
+            });
+          }
+        } catch {}
+      }
+      if (cfg.accessToken) return `Bearer ${cfg.accessToken}`;
+    }
+    if (cfg.apiKey?.trim()) return `Token ${cfg.apiKey.trim()}`;
+    return null;
+  }
+
+  app.get('/api/freesound/status', (_req, res) => {
+    res.json(buildFreesoundStatus());
+  });
+
+  app.put('/api/freesound/config', (req, res) => {
+    const clientId = String(req.body?.clientId ?? '').trim();
+    const apiKey = String(req.body?.apiKey ?? '').trim();
+    const current = getFreesoundConfig();
+    const updated = saveFreesoundConfig({
+      clientId: clientId || current.clientId,
+      apiKey: apiKey || current.apiKey,
+    });
+    res.json(buildFreesoundStatus(updated));
+  });
+
+  app.post('/api/freesound/disconnect', (req, res) => {
+    const clearAll = Boolean(req.body?.clearAll);
+    const updated = saveFreesoundConfig(
+      clearAll
+        ? { clientId: '', apiKey: '', accessToken: '', refreshToken: '', expiresAt: 0 }
+        : { accessToken: '', refreshToken: '', expiresAt: 0 }
+    );
+    res.json(buildFreesoundStatus(updated));
+  });
+
+  app.get('/callback', async (req, res) => {
+    const code = String(req.query?.code || '').trim();
+    const errParam = String(req.query?.error || '').trim();
+    const cfg = getFreesoundConfig();
+
+    const renderCallbackHtml = (ok, title, message) => `<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <title>${title} — Transmission Studio</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #0a0f1d; color: #eaf2ff; font-family: system-ui, sans-serif; }
+    .card { max-width: 420px; padding: 28px; border-radius: 16px; background: #131d35; border: 1px solid ${ok ? '#10b981' : '#f43f5e'}; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.6); }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    p { margin: 0 0 20px; color: #9ab0d6; font-size: 14px; line-height: 1.5; }
+    a { display: inline-block; padding: 10px 18px; border-radius: 10px; background: #3b82f6; color: #fff; text-decoration: none; font-weight: 600; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>${ok ? '✅ Freesound gekoppeld!' : '⚠️ Freesound koppeling mislukt'}</h2>
+    <p>${message}</p>
+    <a href="/#/library">Terug naar Geluidenbibliotheek</a>
+  </div>
+  <script>
+    try {
+      if (window.opener) {
+        window.opener.postMessage({ type: 'freesound-oauth-done', ok: ${ok ? 'true' : 'false'} }, '*');
+        if (${ok ? 'true' : 'false'}) setTimeout(() => window.close(), 900);
+      } else if (${ok ? 'true' : 'false'}) {
+        setTimeout(() => { location.href = '/#/library'; }, 1200);
+      }
+    } catch {}
+  </script>
+</body>
+</html>`;
+
+    if (errParam || !code) {
+      return res.status(400).send(renderCallbackHtml(false, 'Koppeling geannuleerd', errParam || 'Geen autorisatiecode ontvangen op /callback.'));
+    }
+    if (!cfg.clientId || !cfg.apiKey) {
+      return res.status(400).send(renderCallbackHtml(false, 'API gegevens ontbreken', 'Vul eerst je Freesound Client ID en Client Secret / API Key in bij de Geluidenbibliotheek.'));
+    }
+
+    try {
+      const body = new URLSearchParams({
+        client_id: cfg.clientId,
+        client_secret: cfg.apiKey,
+        grant_type: 'authorization_code',
+        code,
+      });
+      const tokenRes = await fetch('https://freesound.org/apiv2/oauth2/access_token/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      const data = await tokenRes.json().catch(() => ({}));
+      if (!tokenRes.ok || !data.access_token) {
+        return res.status(400).send(renderCallbackHtml(false, 'Token uitwisseling mislukt', data.error_description || data.error || `HTTP ${tokenRes.status}`));
+      }
+      saveFreesoundConfig({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || '',
+        expiresAt: Date.now() + (Number(data.expires_in) || 86400) * 1000,
+      });
+      return res.send(renderCallbackHtml(true, 'Freesound verbonden', 'Je Freesound OAuth2 account is gekoppeld. Dit venster sluit automatisch.'));
+    } catch (e) {
+      return res.status(500).send(renderCallbackHtml(false, 'Netwerkfout', e.message));
+    }
+  });
+
+  app.get('/api/freesound/search', async (req, res) => {
+    const auth = await getFreesoundAuthHeader();
+    if (!auth) {
+      return res.status(400).json({ error: 'Stel eerst je Freesound API Key of OAuth2 koppeling in.' });
+    }
+    const query = String(req.query?.q || '').trim();
+    const sort = ['score', 'downloads_desc', 'rating_desc', 'duration_asc', 'duration_desc', 'created_desc'].includes(req.query?.sort)
+      ? req.query.sort
+      : 'score';
+    const page = Math.max(1, parseInt(req.query?.page, 10) || 1);
+    const pageSize = Math.max(1, Math.min(30, parseInt(req.query?.pageSize, 10) || 16));
+    const maxDur = Number(req.query?.maxDuration);
+
+    const params = new URLSearchParams({
+      query,
+      sort,
+      page: String(page),
+      page_size: String(pageSize),
+      fields: 'id,name,tags,description,duration,previews,username,license,avg_rating,num_downloads',
+    });
+    if (Number.isFinite(maxDur) && maxDur > 0) {
+      params.set('filter', `duration:[0 TO ${maxDur}]`);
+    }
+
+    try {
+      const r = await fetch(`https://freesound.org/apiv2/search/text/?${params.toString()}`, {
+        headers: { Authorization: auth },
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        return res.status(r.status).json({ error: data.detail || data.error || `Freesound fout (${r.status})` });
+      }
+      const results = (data.results || []).map((item) => ({
+        id: item.id,
+        name: item.name,
+        username: item.username,
+        license: item.license || '',
+        duration: Number(item.duration) || 0,
+        tags: Array.isArray(item.tags) ? item.tags.slice(0, 6) : [],
+        rating: Number(item.avg_rating) || 0,
+        downloads: Number(item.num_downloads) || 0,
+        previewUrl:
+          item.previews?.['preview-hq-mp3'] ||
+          item.previews?.['preview-lq-mp3'] ||
+          item.previews?.['preview-hq-ogg'] ||
+          item.previews?.['preview-lq-ogg'] ||
+          '',
+        previewOgg: item.previews?.['preview-hq-ogg'] || '',
+      }));
+      res.json({
+        count: Number(data.count) || 0,
+        next: Boolean(data.next),
+        previous: Boolean(data.previous),
+        page,
+        results,
+      });
+    } catch (e) {
+      res.status(502).json({ error: 'Kon Freesound niet bereiken: ' + e.message });
+    }
+  });
+
+  app.post('/api/freesound/import', async (req, res) => {
+    const auth = await getFreesoundAuthHeader();
+    if (!auth) {
+      return res.status(400).json({ error: 'Stel eerst je Freesound API Key of OAuth2 koppeling in.' });
+    }
+    const soundId = Number(req.body?.id || req.body?.soundId);
+    const rawName = String(req.body?.name || `Freesound ${soundId}`).trim();
+    const category = String(req.body?.category || 'Freesound').trim().slice(0, 40) || 'Freesound';
+    const duration = Number(req.body?.duration) || 0;
+    let previewUrl = String(req.body?.previewUrl || '').trim();
+
+    if (!soundId && !previewUrl) {
+      return res.status(400).json({ error: 'soundId of previewUrl ontbreekt' });
+    }
+
+    try {
+      if (!previewUrl && soundId) {
+        const infoRes = await fetch(`https://freesound.org/apiv2/sounds/${soundId}/?fields=id,name,duration,previews`, {
+          headers: { Authorization: auth },
+        });
+        const infoData = await infoRes.json().catch(() => ({}));
+        if (!infoRes.ok) {
+          return res.status(infoRes.status).json({ error: infoData.detail || 'Kon geluidsinfo niet ophalen van Freesound' });
+        }
+        previewUrl =
+          infoData.previews?.['preview-hq-mp3'] ||
+          infoData.previews?.['preview-hq-ogg'] ||
+          infoData.previews?.['preview-lq-mp3'] ||
+          '';
+      }
+
+      if (!previewUrl) {
+        return res.status(400).json({ error: 'Geen audiobestand beschikbaar voor dit geluid' });
+      }
+
+      const audioRes = await fetch(previewUrl);
+      if (!audioRes.ok) {
+        return res.status(502).json({ error: `Download van Freesound mislukt (HTTP ${audioRes.status})` });
+      }
+      const ext = previewUrl.endsWith('.ogg') ? '.ogg' : '.mp3';
+      const mime = ext === '.ogg' ? 'audio/ogg' : 'audio/mpeg';
+      const filename = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}${ext}`;
+      const outPath = path.join(dirs.sfx, filename);
+      const buf = Buffer.from(await audioRes.arrayBuffer());
+      await fs.promises.writeFile(outPath, buf);
+
+      const cleanName = baseName(rawName).slice(0, 120) || `Freesound ${soundId}`;
+      const info = db
+        .prepare('INSERT INTO sfx (name, filename, mime, category, duration) VALUES (?, ?, ?, ?, ?)')
+        .run(cleanName, filename, mime, category, duration);
+      const created = db.prepare('SELECT * FROM sfx WHERE id = ?').get(info.lastInsertRowid);
+      res.status(201).json(created);
+    } catch (e) {
+      res.status(500).json({ error: 'Importeren mislukt: ' + e.message });
+    }
+  });
+
   // ---------- exports (browser-rendered video + soundtrack → ffmpeg mux → MP4) ----------
   app.post('/api/projects/:id/exports', uploadTmp.fields([{ name: 'video', maxCount: 1 }, { name: 'audio', maxCount: 1 }]), async (req, res) => {
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);

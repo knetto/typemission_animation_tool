@@ -65,6 +65,11 @@ export function openDb(file) {
       duration REAL NOT NULL DEFAULT 3,
       position INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL DEFAULT '{}'
+    );
   `);
   // Additive migration: existing projects remain Audio Terminal projects.
   const columns = db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name);

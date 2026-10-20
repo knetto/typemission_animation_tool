@@ -48,6 +48,16 @@ export const api = {
   updateSfx: (id, data) => req('PATCH', `/api/sfx/${id}`, data),
   deleteSfx: (id) => req('DELETE', `/api/sfx/${id}`),
 
+  freesoundStatus: () => req('GET', '/api/freesound/status'),
+  freesoundSaveConfig: (data) => req('PUT', '/api/freesound/config', data),
+  freesoundDisconnect: (clearAll = false) => req('POST', '/api/freesound/disconnect', { clearAll }),
+  freesoundSearch: ({ q = '', sort = 'score', maxDuration = 0, page = 1, pageSize = 16 } = {}) => {
+    const p = new URLSearchParams({ q, sort, page: String(page), pageSize: String(pageSize) });
+    if (maxDuration > 0) p.set('maxDuration', String(maxDuration));
+    return req('GET', `/api/freesound/search?${p.toString()}`);
+  },
+  freesoundImport: (data) => req('POST', '/api/freesound/import', data),
+
   createExport: (projectId, fd) => req('POST', `/api/projects/${projectId}/exports`, fd, true),
   deleteExport: (id) => req('DELETE', `/api/exports/${id}`),
 };

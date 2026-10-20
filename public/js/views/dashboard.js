@@ -7,6 +7,7 @@ import { decodeUrl, SR } from '../audio/engine.js';
 import { previewAudio } from '../preview.js';
 import { sfxStore } from '../audio/sfxstore.js';
 import { createSfxFolders } from '../audio/sfxui.js';
+import { createFreesoundBrowser } from '../audio/freesound.js';
 
 const SCENE_COLOR = { transmission: '#3b8fe0', urgent: '#ff3b3b', ai: '#8b5cf6' };
 
@@ -134,8 +135,11 @@ export async function mount(root, { tab = 'projects' } = {}) {
   }
 
   // ---------- SFX library ----------
+  let fsBrowser = null;
   async function renderSfx() {
+    fsBrowser?.destroy();
     let sfxFilter = 'all';
+    let custom = [];
     const search = h('input', { class: 'input', id: 'sfx-search', placeholder: 'Zoek op naam of categorie…', type: 'search', 'aria-label': 'Sound effects zoeken' });
     const fileIn = h('input', { type: 'file', accept: 'audio/*', multiple: true, hidden: true, id: 'sfx-file' });
     let targetCategory = 'Eigen';
@@ -151,6 +155,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
           search.value = '';
           sfxFilter = 'all';
           toast(`Map "${n.trim()}" gemaakt`, 'ok');
+          fsBrowser?.refreshFolders();
           paint();
         }
       }
@@ -165,14 +170,20 @@ export async function mount(root, { tab = 'projects' } = {}) {
       onclick: () => { targetCategory = 'Eigen'; fileIn.click(); }
     }, icon('upload'), h('span', {}, h('b', {}, 'Eigen geluiden uploaden'), h('span', {}, 'Kies audiobestanden of sleep ze hierheen. Beschikbaar in elk project.')));
 
+    fsBrowser = createFreesoundBrowser({
+      getFolders: () => sfxStore.getCustomFolders(custom),
+      onImported: () => draw(),
+    });
+
     const filterBar = h('div', { class: 'sfx-filter-bar', role: 'group', 'aria-label': 'Effecten filteren' });
     const list = h('div', { class: 'sfx-library-list' });
     body.replaceChildren(
-      h('div', { class: 'sfx-library-heading' }, h('h2', {}, 'Geluidenbibliotheek'), h('p', {}, 'Beluister effecten en bewaar je favorieten voor je volgende transmissie.')),
+      h('div', { class: 'sfx-library-heading' }, h('h2', {}, 'Geluidenbibliotheek'), h('p', {}, 'Beluister effecten, zoek op Freesound.org en bewaar je favorieten voor je volgende transmissie.')),
+      fsBrowser.el,
+      drop,
       h('div', { class: 'sfx-controls' },
         h('div', { class: 'lib-head' }, search, newFolderBtn),
         h('div', { class: 'sfx-filter-row' }, filterBar, toggleAllBtn)),
-      drop,
       fileIn,
       list
     );
@@ -205,9 +216,9 @@ export async function mount(root, { tab = 'projects' } = {}) {
     ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
     drop.addEventListener('drop', (e) => upload(e.dataTransfer.files));
 
-    let custom = [];
     const draw = async () => {
       custom = await api.sfx().catch(() => []);
+      fsBrowser?.refreshFolders();
       paint();
     };
 
@@ -378,5 +389,5 @@ export async function mount(root, { tab = 'projects' } = {}) {
   }
 
   select(current);
-  return () => previewAudio.stop();
+  return () => { fsBrowser?.destroy(); previewAudio.stop(); };
 }

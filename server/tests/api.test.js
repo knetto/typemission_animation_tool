@@ -144,3 +144,25 @@ test('audio-only exports save WAV and MP3 with no video metadata and retain edit
   }
   assert.equal((await json('GET', `/api/projects/${p.id}`)).body.exports.length, 2);
 });
+
+test('Freesound API configuration and /callback route', async () => {
+  const s0 = await json('GET', '/api/freesound/status');
+  assert.equal(s0.status, 200);
+  assert.equal(s0.body.callbackUrl, 'http://localhost:3000/callback');
+
+  const saved = await json('PUT', '/api/freesound/config', { clientId: 'test_client_123', apiKey: 'test_secret_456' });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.configured, true);
+  assert.equal(saved.body.hasKey, true);
+  assert.equal(saved.body.hasClientId, true);
+  assert.ok(saved.body.authorizeUrl.includes('client_id=test_client_123'));
+
+  const cb = await fetch(`${base}/callback?error=access_denied`);
+  assert.equal(cb.status, 400);
+  const html = await cb.text();
+  assert.ok(html.includes('Koppeling geannuleerd'));
+
+  const cleared = await json('POST', '/api/freesound/disconnect', { clearAll: true });
+  assert.equal(cleared.body.configured, false);
+});
+

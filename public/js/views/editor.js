@@ -8,6 +8,7 @@ import { detectVoiced } from '../audio/dsp.js';
 import { previewAudio } from '../preview.js';
 import { sfxStore, sfxId } from '../audio/sfxstore.js';
 import { createSfxFolders } from '../audio/sfxui.js';
+import { openFreesoundModal } from '../audio/freesound.js';
 import { initEditorPanels } from '../editor-panels.js';
 
 const TRACK_H = 116;
@@ -852,8 +853,21 @@ export async function mount(root, { id }) {
         }
       }, icon('upload'), 'Uploaden');
 
+      const freesoundBtn = h('button', {
+        class: 'btn btn-sm',
+        title: 'Geluiden zoeken en importeren via Freesound.org',
+        id: 'sfx-freesound-btn',
+        onclick: () => openFreesoundModal({
+          getFolders: () => sfxStore.getCustomFolders(customSfx),
+          onImported: async () => {
+            customSfx = await api.sfx().catch(() => []);
+            paintList();
+          }
+        })
+      }, icon('globe'), 'Freesound');
+
       const toolbar = h('div', { class: 'sfx-toolbar' }, search,
-        h('div', { class: 'sfx-toolbar-actions' }, uploadBtn, newFolderBtn));
+        h('div', { class: 'sfx-toolbar-actions' }, uploadBtn, freesoundBtn, newFolderBtn));
       const list = h('div', { class: 'sfx-library-list' });
 
       const paintList = () => {

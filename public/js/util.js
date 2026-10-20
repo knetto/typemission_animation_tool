@@ -170,6 +170,10 @@ export function iconSvg(name) {
     collapse: '<path d="M4 12h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
     expand: '<path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
     keyboard: '<rect x="2" y="5" width="20" height="14" rx="2.5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M6 9h2M10 9h2M14 9h2M18 9h0M6 12.5h2M10 12.5h2M14 12.5h2M18 12.5h0M8 16h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    globe: '<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 010 18M12 3a14 14 0 000 18" stroke="currentColor" stroke-width="1.8" fill="none"/>',
+    search: '<circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    key: '<circle cx="7.5" cy="15.5" r="4.5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M10.8 12.2L20 3m-2 2l3 3m-5.5-.5l2.5 2.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
   }[name] || '';
   return `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">${p}</svg>`;
 }
