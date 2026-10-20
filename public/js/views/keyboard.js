@@ -20,7 +20,7 @@ import {
 } from '../keyboard/model.js';
 import { createKeyboardScene } from '../keyboard/renderer.js';
 import { renderCanvasExport, exportSupported } from '../export.js';
-import { ensureFonts } from '../scenes/renderer.js';
+import { ensureFonts, logoSvg } from '../scenes/renderer.js';
 import { initEditorPanels } from '../editor-panels.js';
 
 export async function mount(root, { id, project, exportingView = false }) {
@@ -699,7 +699,9 @@ export async function mount(root, { id, project, exportingView = false }) {
                 })
               : null,
             key.sub ? h('small', { class: 'kb-key-sub' }, key.sub) : null,
-            h('span', { class: 'kb-key-main' }, key.label),
+            key.spyIcon || key.id === 'win'
+              ? h('span', { class: 'kb-key-main kb-key-spy-logo', 'aria-label': 'Spy', html: logoSvg('currentColor') })
+              : h('span', { class: 'kb-key-main' }, key.label),
             isSelected ? h('span', { class: 'kb-key-check', 'aria-hidden': 'true' }, '✓') : null);
           }),
           prevRowIso

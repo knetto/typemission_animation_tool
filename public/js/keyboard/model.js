@@ -97,13 +97,14 @@ export const MASK_MODES = {
 };
 
 // Helper to create a key definition (splits index finger into left 'index' and right 'index_right')
-const k = (id, label, { sub = '', w = 1, wBottom = 0, isoEnter = false, finger = 'pinky', hand = 'left', kind = 'letter', homing = false } = {}) => ({
+const k = (id, label, { sub = '', w = 1, wBottom = 0, isoEnter = false, spyIcon = false, finger = 'pinky', hand = 'left', kind = 'letter', homing = false } = {}) => ({
   id,
   label,
   sub,
   w,
   wBottom: isoEnter ? (wBottom || 1.25) : 0,
   isoEnter,
+  spyIcon,
   finger: finger === 'index' && hand === 'right' ? 'index_right' : finger,
   hand,
   kind,
@@ -180,7 +181,7 @@ export const KEYBOARD_LAYOUTS = {
       ],
       [
         k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', '❖', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
         k('space', 'Spatie', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
         k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
@@ -258,7 +259,7 @@ export const KEYBOARD_LAYOUTS = {
       ],
       [
         k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', '❖', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
         k('space', 'Space', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
         k('ralt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
@@ -337,7 +338,7 @@ export const KEYBOARD_LAYOUTS = {
       ],
       [
         k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', '❖', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
         k('space', 'Space', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
         k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
@@ -416,7 +417,7 @@ export const KEYBOARD_LAYOUTS = {
       ],
       [
         k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', '❖', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
         k('space', 'Spatie', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
         k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
@@ -495,7 +496,7 @@ export const KEYBOARD_LAYOUTS = {
       ],
       [
         k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', '❖', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
         k('space', 'Spatie', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
         k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
@@ -665,6 +666,7 @@ export function keyExportSlug(key) {
   if (key.id === 'space') return 'spatie';
   if (key.id === 'enter') return 'enter';
   if (key.id === 'backspace') return 'backspace';
+  if (key.id === 'win' || key.spyIcon) return 'spy';
   const clean = raw.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   return clean || key.id;
 }
