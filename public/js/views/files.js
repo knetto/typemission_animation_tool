@@ -256,8 +256,12 @@ export async function mount(root, { id, project, exportingView = false }) {
     stop();
     const segment = scene?.schedule.segments.find((s) => s.image.id === imageId);
     if (segment) {
-      const offset = opts.variant === 'images' ? 0.05 : Math.min(1.1, segment.hold * 0.45);
-      draw(segment.open + offset);
+      if (segment.noOpen) {
+        draw(segment.fileDoubleClick);
+      } else {
+        const offset = opts.variant === 'images' ? 0.05 : Math.min(1.1, segment.hold * 0.45);
+        draw(segment.open + offset);
+      }
     }
     paintFiles();
     paintSettings();
@@ -503,6 +507,22 @@ export async function mount(root, { id, project, exportingView = false }) {
       h('label', { class: 'toggle' },
         h('input', {
           type: 'checkbox',
+          id: 'email-stop-on-open',
+          checked: Boolean(opts.stopOnOpen),
+          disabled: exporting,
+          onchange: (e) => {
+            opts.stopOnOpen = e.target.checked;
+            optionChanged();
+            paintSettings();
+          }
+        }),
+        h('span', { class: 'track' }),
+        'Stop bij openen (toon geopende e-mail niet)'
+      ),
+      h('p', { class: 'hint' }, 'Stopt de animatie precies op het moment dat er op de e-mail wordt gedubbelklikt in de verkenner.'),
+      h('label', { class: 'toggle' },
+        h('input', {
+          type: 'checkbox',
           checked: emailItem.scrambled !== false,
           onchange: (e) => {
             emailItem.scrambled = e.target.checked;
@@ -627,6 +647,7 @@ export async function mount(root, { id, project, exportingView = false }) {
       h('label', { class: 'field' }, 'Explorer title', h('input', { class: 'input', value: opts.title, maxlength: 70, disabled: exporting, onchange: (e) => { opts.title = e.target.value || 'CLASSIFIED FILE ARCHIVE'; optionChanged(); } })),
       toggle('Show login intro', 'intro', 'file-intro'), h('p', { class: 'hint' }, 'System Login → username → masked password → file list → explorer.'),
       opts.intro ? h('label', { class: 'field' }, 'Intro username', h('input', { class: 'input', id: 'file-username', maxlength: 30, value: opts.username, disabled: exporting, onchange: (e) => { opts.username = e.target.value || 'operator'; optionChanged(); } })) : null,
+      toggle('Stop bij openen (toon inhoud niet)', 'stopOnOpen', 'file-stop-on-open'), h('p', { class: 'hint' }, 'Stopt de animatie zodra het bestand wordt aangeklikt om te openen — het geopende venster komt niet in beeld.'),
       toggle('Show logout outro', 'outro', 'file-outro'), h('p', { class: 'hint' }, 'Close the viewer and explorer, log out, then finish on an empty black terminal.'),
       toggle('Navigation sounds', 'sounds', 'file-sounds'), h('p', { class: 'hint' }, 'Subtle mouse clicks, typing, and folder and file opening sounds.'),
       opts.sounds ? h('label', { class: 'field' }, 'Volume', h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: opts.volume, disabled: exporting, 'aria-label': 'Navigation sound volume', onchange: (e) => { opts.volume = +e.target.value; optionChanged(); } })) : null);

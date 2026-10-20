@@ -40,13 +40,15 @@ export function filePointer(s, time, { folder, file, first = false }) {
   if (time < s.open) {
     if (s.folderChanged && time < s.folderOpen) position = move(origin, folder, (time - s.start) / (s.folderArrive - s.start), 0);
     else position = move(s.folderChanged ? folder : origin, file, (time - s.fileMove) / (s.fileArrive - s.fileMove), 1);
+  } else if (s.noOpen) {
+    position = file;
   } else if (time < s.close) {
     const retreat = Math.min(0.8 * s.pace, s.hold * 0.65);
     position = move(file, parked, (time - s.open - 0.05) / retreat, 2);
   } else position = move(parked, close, (time - s.close) / (s.closeArrive - s.close), 3);
   const hover = s.folderChanged && time >= s.folderArrive - 0.12 * s.pace && time < s.folderOpen ? 'folder'
-    : time >= s.fileArrive - 0.12 * s.pace && time < s.open ? 'file'
-    : time >= s.closeArrive - 0.12 * s.pace && time < s.closeClick ? 'close' : null;
-  const clicks = [s.fileClick, s.fileDoubleClick, s.closeClick, ...(s.folderChanged ? [s.folderClick] : [])];
+    : time >= s.fileArrive - 0.12 * s.pace && (s.noOpen || time < s.open) ? 'file'
+    : !s.noOpen && time >= s.closeArrive - 0.12 * s.pace && time < s.closeClick ? 'close' : null;
+  const clicks = [s.fileClick, s.fileDoubleClick, ...(s.noOpen ? [] : [s.closeClick]), ...(s.folderChanged ? [s.folderClick] : [])];
   return { ...position, hover, pressed: clicks.some((at) => time >= at && time < at + 0.075) };
 }

@@ -198,6 +198,16 @@ test('File Terminal variants (images, login_log, email) persist and schedule int
   assert.ok(mailSched.intro > 4);
   assert.equal(mailSched.segments.length, 1);
   assert.equal(mailSched.segments[0].folder, 'Inbox');
+  assert.equal(mailSched.segments[0].noOpen, false);
+
+  const { sequenceAt } = await import('../../public/js/files/model.js');
+  const stopOpts = normalizeFileOpts({ variant: 'email', stopOnOpen: true });
+  assert.equal(stopOpts.stopOnOpen, true);
+  const stopSched = fileSchedule([], stopOpts);
+  assert.equal(stopSched.segments[0].noOpen, true);
+  assert.equal(stopSched.segments[0].hold, 0);
+  assert.equal(stopSched.outro, null);
+  assert.equal(sequenceAt(stopSched, stopSched.total).phase, 'navigate');
 });
 
 

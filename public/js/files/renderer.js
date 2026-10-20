@@ -324,7 +324,7 @@ export async function createFileScene(canvas, images, options = {}) {
     text(`SEQUENCE ${count}/${items.length}`, 1520, 993, 21, colors.muted);
     if (s) {
       const phase = state.phase;
-      const viewer = phase === 'image' || (phase === 'close' && t < s.closeClick);
+      const viewer = !s.noOpen && (phase === 'image' || (phase === 'close' && t < s.closeClick));
       if (viewer) {
         g.fillStyle = '#000a'; g.fillRect(60, 118, 1800, 902);
         rect(180, 155, 1560, 805, colors.bg, colors.accent);
