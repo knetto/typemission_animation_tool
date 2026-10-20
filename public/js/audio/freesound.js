@@ -604,7 +604,6 @@ export function createFreesoundBrowser({ onImported, getCustomSfx, getFolders, s
 
       grid.append(
         h('div', { class: 'fs-wave-card', style: { '--i': idx } },
-          waveBox,
           h('div', { class: 'fs-wave-meta' },
             h('div', { class: 'info' },
               h('div', { class: 'name', title: displayName }, displayName),
@@ -615,7 +614,8 @@ export function createFreesoundBrowser({ onImported, getCustomSfx, getFolders, s
               )
             ),
             h('div', { class: 'acts' }, favBtn, saveBtn, optionsBtn, options)
-          )
+          ),
+          waveBox
         )
       );
     });

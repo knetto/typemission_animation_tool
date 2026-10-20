@@ -767,7 +767,7 @@ export async function mount(root, { id }) {
     const waveEl = wave ? createWaveBox({ ...wave, playBtn: playB, compact: true }) : null;
 
     const item = h('div', { class: `media-item ${cls}${waveEl ? ' has-wave' : ''}`, draggable: 'true', title: `${name}\nSleep naar de tijdlijn of dubbelklik om toe te voegen` },
-      waveEl || playB,
+      waveEl ? null : playB,
       h('div', { class: 'media-item-bottom' },
         h('div', { class: 'info' },
           h('div', { class: 'name' }, name),
@@ -783,7 +783,8 @@ export async function mount(root, { id }) {
             onclick: (e) => openContextMenu(e, normActs, name)
           }, '⋯') : null
         )
-      )
+      ),
+      waveEl
     );
 
     item.addEventListener('dragstart', (e) => {

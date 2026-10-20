@@ -385,13 +385,13 @@ export async function mount(root, { tab = 'projects' } = {}) {
       });
 
       return h('div', { class: 'fs-wave-card', style: { '--i': i } },
-        waveBox,
         h('div', { class: 'fs-wave-meta' },
           h('div', { class: 'info' },
             h('div', { class: 'name', title: displayName }, displayName),
             h('div', { class: 'sub' }, hasAlias ? h('span', { class: 'badge', style: { fontSize: '9px', padding: '1px 4px', marginRight: '4px' } }, 'aangepast') : null, `${s.category || 'Eigen'}${s.duration ? ' · ' + s.duration.toFixed(1) + 's' : ''}`)),
           acts
-        )
+        ),
+        waveBox
       );
     };
 
