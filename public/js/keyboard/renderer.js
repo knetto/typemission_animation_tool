@@ -10,6 +10,9 @@ import {
 } from './model.js';
 import { drawLogo, LOGO_ASPECT } from '../scenes/renderer.js';
 
+// Keycap icons are drawn slightly narrower than the native (wide) logo so they read as upright, not stretched.
+const KEY_LOGO_ASPECT = LOGO_ASPECT / 0.84;
+
 export const W = 1920, H = 1080;
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
@@ -220,9 +223,9 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     g.textAlign = 'center';
     g.textBaseline = 'middle';
     if (k.spyIcon || k.id === 'win') {
-      const logoW = Math.min(topW * 0.42, (topH * 0.50) / LOGO_ASPECT);
-      const logoH = logoW * LOGO_ASPECT;
-      drawLogo(g, textCenterX - logoW / 2, topY + (topH - logoH) / 2, logoW, theme.keyText);
+      const logoW = Math.min(topW * 0.42, (topH * 0.50) / KEY_LOGO_ASPECT);
+      const logoH = logoW * KEY_LOGO_ASPECT;
+      drawLogo(g, textCenterX - logoW / 2, topY + (topH - logoH) / 2, logoW, theme.keyText, logoH);
     } else if (k.sub) {
       g.font = '600 16px "Outfit", sans-serif';
       g.fillStyle = theme.keySub;
@@ -340,9 +343,9 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       g.shadowColor = 'rgba(0, 0, 0, 0.35)';
       g.shadowBlur = 4;
       if (k.spyIcon || k.id === 'win') {
-        const logoW = Math.min(sw * 0.42, (sh * 0.50) / LOGO_ASPECT);
-        const logoH = logoW * LOGO_ASPECT;
-        drawLogo(g, sx + (sStepX + sw) / 2 - logoW / 2, sy + (sh - logoH) / 2, logoW, '#ffffff');
+        const logoW = Math.min(sw * 0.42, (sh * 0.50) / KEY_LOGO_ASPECT);
+        const logoH = logoW * KEY_LOGO_ASPECT;
+        drawLogo(g, sx + (sStepX + sw) / 2 - logoW / 2, sy + (sh - logoH) / 2, logoW, '#ffffff', logoH);
       } else {
         g.textAlign = 'center';
         g.textBaseline = 'middle';

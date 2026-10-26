@@ -395,6 +395,33 @@ export async function mount(root, { id, project, exportingView = false }) {
 
   function optionChanged() { persist(); paintSequence(); changedPreview(); }
   const toggle = (label, key, idAttr) => h('label', { class: 'toggle' }, h('input', { type: 'checkbox', id: idAttr, checked: opts[key], disabled: exporting, onchange: (e) => { opts[key] = e.target.checked; optionChanged(); paintSettings(); } }), h('span', { class: 'track' }), label);
+  // "Stop on open" and "end while open" are mutually exclusive endings.
+  const setEnding = (key, on) => {
+    opts[key] = on;
+    if (on) opts[key === 'stopOnOpen' ? 'endWhileOpen' : 'stopOnOpen'] = false;
+    optionChanged();
+    paintSettings();
+  };
+  const stopOnOpenToggle = (label, idAttr) => h('label', { class: 'toggle' },
+    h('input', { type: 'checkbox', id: idAttr, checked: Boolean(opts.stopOnOpen), disabled: exporting, onchange: (e) => setEnding('stopOnOpen', e.target.checked) }),
+    h('span', { class: 'track' }), label);
+  const endWhileOpenControls = (idSuffix) => [
+    h('label', { class: 'toggle' },
+      h('input', { type: 'checkbox', id: `end-while-open-${idSuffix}`, checked: Boolean(opts.endWhileOpen), disabled: exporting, onchange: (e) => setEnding('endWhileOpen', e.target.checked) }),
+      h('span', { class: 'track' }), 'Open houden en eindigen (niet sluiten)'),
+    h('p', { class: 'hint' }, 'Opent het laatste bestand, laat het een ingesteld aantal seconden open staan en eindigt de animatie zonder te sluiten.'),
+    opts.endWhileOpen ? h('label', { class: 'field' }, 'Open houden (seconden)', h('input', {
+      class: 'input',
+      type: 'number',
+      min: 0.5,
+      max: 60,
+      step: 0.5,
+      id: `end-while-open-seconds-${idSuffix}`,
+      value: Number.isFinite(opts.endWhileOpenSeconds) ? opts.endWhileOpenSeconds : 5,
+      disabled: exporting,
+      onchange: (e) => { opts.endWhileOpenSeconds = Math.max(0.5, Math.min(60, +e.target.value || 5)); e.target.value = opts.endWhileOpenSeconds; optionChanged(); },
+    })) : null,
+  ];
 
   function renderSelectedLogSettings(logItem) {
     const card = h('div', { class: 'insp-card file-selected-settings' }, h('h6', {}, 'Geselecteerd Inlog-logboek'));
@@ -504,22 +531,9 @@ export async function mount(root, { id, project, exportingView = false }) {
       paintFiles();
     };
     card.append(
-      h('label', { class: 'toggle' },
-        h('input', {
-          type: 'checkbox',
-          id: 'email-stop-on-open',
-          checked: Boolean(opts.stopOnOpen),
-          disabled: exporting,
-          onchange: (e) => {
-            opts.stopOnOpen = e.target.checked;
-            optionChanged();
-            paintSettings();
-          }
-        }),
-        h('span', { class: 'track' }),
-        'Stop bij openen (toon geopende e-mail niet)'
-      ),
+      stopOnOpenToggle('Stop bij openen (toon geopende e-mail niet)', 'email-stop-on-open'),
       h('p', { class: 'hint' }, 'Stopt de animatie precies op het moment dat er op de e-mail wordt gedubbelklikt in de verkenner.'),
+      ...endWhileOpenControls('email'),
       h('label', { class: 'toggle' },
         h('input', {
           type: 'checkbox',
@@ -647,7 +661,8 @@ export async function mount(root, { id, project, exportingView = false }) {
       h('label', { class: 'field' }, 'Explorer title', h('input', { class: 'input', value: opts.title, maxlength: 70, disabled: exporting, onchange: (e) => { opts.title = e.target.value || 'CLASSIFIED FILE ARCHIVE'; optionChanged(); } })),
       toggle('Show login intro', 'intro', 'file-intro'), h('p', { class: 'hint' }, 'System Login → username → masked password → file list → explorer.'),
       opts.intro ? h('label', { class: 'field' }, 'Intro username', h('input', { class: 'input', id: 'file-username', maxlength: 30, value: opts.username, disabled: exporting, onchange: (e) => { opts.username = e.target.value || 'operator'; optionChanged(); } })) : null,
-      toggle('Stop bij openen (toon inhoud niet)', 'stopOnOpen', 'file-stop-on-open'), h('p', { class: 'hint' }, 'Stopt de animatie zodra het bestand wordt aangeklikt om te openen — het geopende venster komt niet in beeld.'),
+      stopOnOpenToggle('Stop bij openen (toon inhoud niet)', 'file-stop-on-open'), h('p', { class: 'hint' }, 'Stopt de animatie zodra het bestand wordt aangeklikt om te openen — het geopende venster komt niet in beeld.'),
+      ...endWhileOpenControls('general'),
       toggle('Show logout outro', 'outro', 'file-outro'), h('p', { class: 'hint' }, 'Close the viewer and explorer, log out, then finish on an empty black terminal.'),
       toggle('Navigation sounds', 'sounds', 'file-sounds'), h('p', { class: 'hint' }, 'Subtle mouse clicks, typing, and folder and file opening sounds.'),
       opts.sounds ? h('label', { class: 'field' }, 'Volume', h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: opts.volume, disabled: exporting, 'aria-label': 'Navigation sound volume', onchange: (e) => { opts.volume = +e.target.value; optionChanged(); } })) : null);

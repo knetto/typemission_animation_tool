@@ -178,6 +178,9 @@ export function normalizeFileOpts(opts = {}) {
     intro: opts.intro !== false,
     outro: opts.outro === true,
     stopOnOpen: opts.stopOnOpen === true,
+    // Open the last file, keep it on screen for N seconds, then end without closing it.
+    endWhileOpen: opts.endWhileOpen === true && opts.stopOnOpen !== true,
+    endWhileOpenSeconds: Number.isFinite(opts.endWhileOpenSeconds) ? Math.max(0.5, Math.min(60, opts.endWhileOpenSeconds)) : 5,
     sounds: opts.sounds !== false,
     motionSeed: Number.isFinite(opts.motionSeed) ? opts.motionSeed >>> 0 : 41763,
     volume: Number.isFinite(opts.volume) ? Math.max(0, Math.min(1, opts.volume)) : 0.65,
@@ -206,29 +209,30 @@ export function fileSchedule(images, options = {}) {
     const folder = image.folder || defaultFolder, folderChanged = previous !== folder;
     const pace = opts.pace;
     const noOpen = Boolean(opts.stopOnOpen || image.stopOnOpen);
+    const keepOpen = !noOpen && opts.endWhileOpen && index === items.length - 1;
     const folderArrive = cursor + 0.9 * pace, folderClick = cursor + 1.25 * pace, folderOpen = cursor + 1.45 * pace;
     const fileMove = folderChanged ? folderOpen + 0.18 * pace : cursor + 0.1 * pace;
     const fileArrive = cursor + (folderChanged ? 2.35 : 1.05) * pace;
     const fileClick = fileArrive + 0.35 * pace, fileDoubleClick = fileClick + 0.15 * pace;
     const open = fileDoubleClick + 0.16 * pace;
-    const hold = noOpen ? 0 : (Number.isFinite(image.duration) ? Math.max(0.5, Math.min(60, image.duration)) : 3);
+    const hold = noOpen ? 0 : keepOpen ? opts.endWhileOpenSeconds : (Number.isFinite(image.duration) ? Math.max(0.5, Math.min(60, image.duration)) : 3);
     const close = noOpen ? open : open + hold;
-    const closeArrive = noOpen ? open : close + 0.7 * pace;
-    const closeClick = noOpen ? open : close + 0.98 * pace;
-    const end = noOpen ? open + 0.12 * pace : close + 1.25 * pace;
+    const closeArrive = noOpen || keepOpen ? close : close + 0.7 * pace;
+    const closeClick = noOpen || keepOpen ? close : close + 0.98 * pace;
+    const end = noOpen ? open + 0.12 * pace : keepOpen ? close : close + 1.25 * pace;
     const motionSeed = (opts.motionSeed ^ Math.imul(index + 1, 2654435761) ^ Math.imul(Number(image.id) || 0, 2246822519)) >>> 0;
-    const segment = { image, item: image, folder, folderChanged, noOpen, motionSeed, start: cursor, folderArrive, folderClick, folderOpen, fileMove, fileArrive, fileClick, fileDoubleClick, open, close, closeArrive, closeClick, end, hold, pace };
+    const segment = { image, item: image, folder, folderChanged, noOpen, keepOpen, motionSeed, start: cursor, folderArrive, folderClick, folderOpen, fileMove, fileArrive, fileClick, fileDoubleClick, open, close, closeArrive, closeClick, end, hold, pace };
     cursor = segment.end; previous = folder;
     return segment;
   });
   const terminal = cursor + 1.4 * opts.pace;
-  const outro = opts.outro && !opts.stopOnOpen && items.length ? {
+  const outro = opts.outro && !opts.stopOnOpen && !opts.endWhileOpen && items.length ? {
     start: cursor, arrive: cursor + 0.85 * opts.pace, click: cursor + 1.2 * opts.pace,
     terminal, logout: terminal + 0.4, loggedOut: terminal + 1.8,
     clear: terminal + 2.6, blank: terminal + 3.5, end: terminal + 4.8,
     motionSeed: opts.motionSeed, pace: opts.pace,
   } : null;
-  return { intro, segments, outro, total: outro ? outro.end : cursor + (items.length && !opts.stopOnOpen ? 0.8 : 0) };
+  return { intro, segments, outro, total: outro ? outro.end : cursor + (items.length && !opts.stopOnOpen && !opts.endWhileOpen ? 0.8 : 0) };
 }
 
 export const displayFileFolder = (name) => name === 'Bestanden' ? 'Files' : name;
@@ -239,6 +243,7 @@ export function sequenceAt(schedule, time) {
   const segment = schedule.segments.find((s) => time < s.end) || schedule.segments.at(-1);
   if (!segment) return { phase: 'empty', segment: null, elapsed: 0 };
   if (segment.noOpen) return { phase: 'navigate', segment, elapsed: time - segment.start };
+  if (segment.keepOpen) return { phase: time < segment.open ? 'navigate' : 'image', segment, elapsed: time - segment.start };
   return { phase: time < segment.open ? 'navigate' : time < segment.close ? 'image' : 'close', segment, elapsed: time - segment.start };
 }
 
@@ -254,7 +259,7 @@ export function fileSoundEvents(schedule, opts) {
     if (s.folderChanged) events.push({ at: s.folderClick, kind: 'click' }, { at: s.folderOpen, kind: 'folder' });
     events.push({ at: s.fileClick, kind: 'click' }, { at: s.fileDoubleClick, kind: 'click' }, { at: s.open, kind: 'open' });
     if (s.noOpen) return;
-    events.push({ at: s.closeClick, kind: 'click' });
+    if (!s.keepOpen) events.push({ at: s.closeClick, kind: 'click' });
     if (opts?.variant === 'login_log' || opts?.variant === 'email') {
       const ticks = opts.variant === 'login_log' ? 6 : 8;
       for (let i = 0; i < ticks; i++) {

@@ -43,10 +43,11 @@ export const LOGO_ASPECT = 512 / 627;
 export const logoSvg = (color = 'currentColor') =>
   `<svg viewBox="48 50 627 512" aria-hidden="true"><g fill="${color}" stroke="${color}" stroke-width="6" stroke-linejoin="round">${LOGO_FILL.map((d) => `<path d="${d}"/>`).join('')}</g><g fill="${color}">${LOGO_LENS.map((d) => `<path d="${d}"/>`).join('')}</g></svg>`;
 
-export function drawLogo(ctx, x, y, w, color) {
-  const L = getLogo(), s = w / 627;
+// Optional `h` lets callers draw the logo with a custom height (defaults to the native aspect ratio).
+export function drawLogo(ctx, x, y, w, color, h = w * LOGO_ASPECT) {
+  const L = getLogo(), sx = w / 627, sy = h / 512;
   ctx.save();
-  ctx.translate(x, y); ctx.scale(s, s); ctx.translate(-48, -50);
+  ctx.translate(x, y); ctx.scale(sx, sy); ctx.translate(-48, -50);
   ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = 6; ctx.lineJoin = 'round';
   for (const p of L.fill) { ctx.fill(p); ctx.stroke(p); }
   for (const p of L.lens) ctx.fill(p);
