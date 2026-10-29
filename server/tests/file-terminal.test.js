@@ -146,3 +146,37 @@ test('optional logout outro closes after the last image and ends with a silent b
     assert.ok(pcm.slice(Math.ceil(o.blank * 8000)).every((sample) => sample === 0));
   }
 });
+
+test('folderLocked schedules a locked folder attempt before the cut (Deel 1) and opens after cracking (Deel 2)', () => {
+  const images = [{ id: 1, folder: 'Files', duration: 3 }];
+  const opts = normalizeFileOpts({ intro: false, folderLocked: true });
+  assert.equal(opts.folderLocked, true);
+  const schedule = fileSchedule(images, opts);
+  const s = schedule.segments[0];
+  assert.equal(s.locked, true);
+  assert.ok(schedule.cut > 3 && schedule.cut < schedule.total);
+  assert.equal(schedule.cut, s.cut);
+  assert.ok(s.start < s.lockArrive && s.lockArrive < s.lockClick && s.lockClick < s.lockDoubleClick && s.lockDoubleClick < s.lockDenied && s.lockDenied < s.cut);
+  assert.ok(s.cut < s.folderArrive && s.folderArrive < s.folderClick && s.folderClick < s.folderOpen && s.folderOpen < s.open);
+
+  assert.equal(sequenceAt(schedule, s.lockClick).phase, 'lock_navigate');
+  assert.equal(sequenceAt(schedule, s.lockDenied + 0.1).phase, 'locked');
+  assert.equal(sequenceAt(schedule, s.cut + 0.1).phase, 'navigate');
+  assert.equal(sequenceAt(schedule, s.open + 0.1).phase, 'image');
+
+  const points = { folder: { x: 218, y: 330 }, file: { x: 574, y: 402 }, first: true };
+  const pLockClick = filePointer(s, s.lockClick, points);
+  assert.ok(Math.hypot(pLockClick.x - points.folder.x, pLockClick.y - points.folder.y) < 1e-9);
+  assert.equal(pLockClick.pressed, true);
+
+  const pPart2Click = filePointer(s, s.folderClick, points);
+  assert.ok(Math.hypot(pPart2Click.x - points.folder.x, pPart2Click.y - points.folder.y) < 1e-9);
+  assert.equal(pPart2Click.pressed, true);
+
+  const events = fileSoundEvents(schedule, opts);
+  assert.ok(events.some((e) => e.kind === 'denied' && Math.abs(e.at - s.lockDenied) < 1e-10));
+  const pcm = fileSoundtrack(schedule, opts, 8000);
+  const cutSample = Math.round(schedule.cut * 8000);
+  assert.ok(pcm.slice(0, cutSample).some((sample) => sample !== 0), 'Deel 1 has navigation and denied sounds');
+  assert.ok(pcm.slice(cutSample).some((sample) => sample !== 0), 'Deel 2 has folder and file open sounds');
+});

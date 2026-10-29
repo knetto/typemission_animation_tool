@@ -10,6 +10,7 @@ export async function mount(root, { id }) {
   const project = await api.project(id);
   if (project.type === 'file') return (await import('./files.js')).mount(root, { id, project, exportingView: true });
   if (project.type === 'keyboard') return (await import('./keyboard.js')).mount(root, { id, project, exportingView: true });
+  if (project.type === 'hack') return (await import('./hack.js')).mount(root, { id, project, exportingView: true });
   const assets = project.assets || [];
   const customSfx = await api.sfx().catch(() => []);
   let exports = project.exports || [];

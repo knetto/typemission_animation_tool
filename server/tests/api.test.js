@@ -145,6 +145,46 @@ test('audio-only exports save WAV and MP3 with no video metadata and retain edit
   assert.equal((await json('GET', `/api/projects/${p.id}`)).body.exports.length, 2);
 });
 
+test('transparent WebM and MOV exports retain alpha, frames and audio; WebM is smaller', async () => {
+  const p = (await json('POST', '/api/projects', { name: 'Compact alpha', type: 'hack' })).body;
+  const framesDir = path.join(tmp, 'alpha-frames');
+  fs.mkdirSync(framesDir);
+  await runFfmpeg(['-f', 'lavfi', '-i', 'color=c=red@0.5:s=64x64:r=30:d=1,format=rgba', '-start_number', '0', path.join(framesDir, '%06d.png')]);
+  const sizes = {};
+  for (const format of ['mov', 'webm']) {
+    const started = await json('POST', `/api/projects/${p.id}/exports/mov`);
+    assert.equal(started.status, 201);
+    const endpoint = `/api/exports/mov/${started.body.token}`;
+    const frames = new FormData();
+    for (const name of fs.readdirSync(framesDir)) frames.append('frames', new Blob([fs.readFileSync(path.join(framesDir, name))], { type: 'image/png' }), name);
+    assert.equal((await fetch(base + endpoint + '/frames', { method: 'POST', body: frames })).status, 200);
+    const body = new FormData();
+    body.append('audio', new Blob([wav(1)], { type: 'audio/wav' }), 'audio.wav');
+    body.append('format', format); body.append('scene', 'hack');
+    body.append('width', '64'); body.append('height', '64'); body.append('fps', '30'); body.append('duration', '1');
+    const response = await fetch(base + endpoint + '/finish', { method: 'POST', body });
+    const exp = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(exp));
+    assert.ok(exp.filename.endsWith(`.${format}`));
+    const download = await fetch(`${base}/files/exports/${exp.filename}`);
+    assert.equal(download.status, 200);
+    sizes[format] = (await download.arrayBuffer()).byteLength;
+    assert.equal(sizes[format], exp.size);
+    const videoPath = path.join(tmp, 'exports', exp.filename);
+    const alphaPath = path.join(tmp, `alpha-${format}.raw`);
+    await runFfmpeg([...(format === 'webm' ? ['-c:v', 'libvpx-vp9'] : []), '-i', videoPath, '-vf', 'alphaextract', '-pix_fmt', 'gray', '-f', 'rawvideo', alphaPath]);
+    const alpha = fs.readFileSync(alphaPath);
+    assert.equal(alpha.length, 64 * 64 * 30);
+    assert.ok(alpha[0] > 100 && alpha[0] < 160, `Expected semi-transparent alpha, got ${alpha[0]}`);
+    const audioPath = path.join(tmp, `alpha-audio-${format}.raw`);
+    await runFfmpeg(['-i', videoPath, '-map', '0:a:0', '-f', 'f32le', '-ar', '48000', audioPath]);
+    const audio = fs.readFileSync(audioPath);
+    assert.ok(Math.abs(audio.length / 4 / 48000 - 1) < 0.04);
+    assert.ok(Math.abs(audio.readFloatLE(4000)) > 0.001);
+  }
+  assert.ok(sizes.webm < sizes.mov, `WebM ${sizes.webm} should be smaller than MOV ${sizes.mov}`);
+});
+
 test('Freesound API configuration and /callback route', async () => {
   const s0 = await json('GET', '/api/freesound/status');
   assert.equal(s0.status, 200);
@@ -191,9 +231,15 @@ test('File Terminal variants (images, login_log, email) persist and schedule int
   assert.equal(pMail.file_opts.variant, 'email');
   const mailOpts = normalizeFileOpts(pMail.file_opts);
   assert.equal(mailOpts.emails[0].scrambled, true);
+  assert.equal(mailOpts.emails[0].scrambleStatic, false);
   const scrambledSample = scrambleText('Geheim bericht voor agent', 1, 10);
   assert.equal(scrambledSample.length, 'Geheim bericht voor agent'.length);
-  assert.NotEqual?.(scrambledSample, 'Geheim bericht voor agent');
+  assert.notEqual(scrambledSample, 'Geheim bericht voor agent');
+  assert.equal(
+    scrambleText('Geheim bericht voor agent', 1, 10, false),
+    scrambleText('Geheim bericht voor agent', 99, 10, false),
+    'static scramble does not flicker across ticks'
+  );
   const mailSched = fileSchedule([], mailOpts);
   assert.ok(mailSched.intro > 4);
   assert.equal(mailSched.segments.length, 1);
@@ -208,6 +254,29 @@ test('File Terminal variants (images, login_log, email) persist and schedule int
   assert.equal(stopSched.segments[0].hold, 0);
   assert.equal(stopSched.outro, null);
   assert.equal(sequenceAt(stopSched, stopSched.total).phase, 'navigate');
+
+  const lockedMailOpts = normalizeFileOpts({ variant: 'email', folderLocked: true });
+  assert.equal(lockedMailOpts.folderLocked, true);
+  const lockedMailSched = fileSchedule([], lockedMailOpts);
+  assert.ok(lockedMailSched.cut > lockedMailSched.intro);
+  assert.equal(sequenceAt(lockedMailSched, lockedMailSched.segments[0].lockDenied + 0.2).phase, 'locked');
+  assert.equal(sequenceAt(lockedMailSched, lockedMailSched.cut + 0.2).phase, 'navigate');
+
+  // Verify 2-part export labels (deel-1-vergrendeld & deel-2-gekraakt)
+  const v = path.join(tmp, 'v-part.mp4'), a = path.join(tmp, 'a-part.wav');
+  await runFfmpeg(['-f', 'lavfi', '-i', 'color=c=black:s=320x180:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', v]);
+  fs.writeFileSync(a, wav(1));
+  for (const partLabel of ['deel-1-vergrendeld', 'deel-2-gekraakt']) {
+    const fd = new FormData();
+    fd.append('video', new Blob([fs.readFileSync(v)], { type: 'video/mp4' }), 'v.mp4');
+    fd.append('audio', new Blob([fs.readFileSync(a)], { type: 'audio/wav' }), 'a.wav');
+    fd.append('scene', 'file'); fd.append('partLabel', partLabel);
+    fd.append('width', '320'); fd.append('height', '180'); fd.append('fps', '30'); fd.append('duration', '1');
+    const r = await fetch(`${base}/api/projects/${pMail.id}/exports`, { method: 'POST', body: fd });
+    const exp = await r.json();
+    assert.equal(r.status, 201);
+    assert.ok(exp.filename.includes(`-${partLabel}-`), `Expected filename to include -${partLabel}-, got ${exp.filename}`);
+  }
 });
 
 

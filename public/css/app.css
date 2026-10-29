@@ -1,4 +1,4 @@
-/* ============ Transmission Studio — design system ============ */
+/* ============ Transmission Studio â€” design system ============ */
 :root {
   --bg: #070a14;
   --bg-2: #0b1020;
@@ -1046,15 +1046,21 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .file-preview-controls input { min-width: 50px; flex: 1; }
 .file-preview-controls .mono { font-size: 11px; white-space: nowrap; color: #abbddd; }
 .file-playback-timeline { width: 100%; overflow-x: auto; margin-top: 12px; padding: 1px 0 5px; scrollbar-width: thin; }
-.file-timeline-track { position: relative; height: 67px; background: #101b2e; border: 1px solid #31425f; border-radius: 9px; overflow: hidden; }
-.file-time-marker { position: absolute; top: 0; height: 100%; background: #14233b; border: 0; border-right: 1px solid #405573; text-align: left; color: #dce9ff; padding: 11px 10px; display: flex; flex-direction: column; gap: 7px; cursor: pointer; min-width: 0; }
+.file-timeline-track { position: relative; height: 67px; background: #101b2e; border: 1px solid #31425f; border-radius: 9px; overflow: hidden; cursor: ew-resize; user-select: none; touch-action: none; }
+.file-time-marker { position: absolute; top: 0; height: 100%; background: #14233b; border: 0; border-right: 1px solid #405573; text-align: left; color: #dce9ff; padding: 11px 10px; display: flex; flex-direction: column; gap: 7px; cursor: ew-resize; min-width: 0; user-select: none; }
 .file-time-marker:hover { background: #253f65; }
 .file-time-marker.active { background: #243e63; box-shadow: inset 0 3px #8eb7ff; }
 .file-time-marker small { position: relative; z-index: 1; color: #9bc3ff; font-size: 11px; }
 .file-time-marker b { position: relative; z-index: 1; display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; }
 .file-time-visible { position: absolute; top: 0; bottom: 0; background: #77b5ff13; pointer-events: none; }
 .file-time-intro { background: #211d38; }
-.file-time-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #d9e8ff; box-shadow: 0 0 5px #a2c8ff; pointer-events: none; z-index: 2; transform: translateX(-1px); }
+.file-time-locked { background: #311520; border-right: 2px dashed #ff7a8a; }
+.file-time-locked:hover { background: #461d2c; }
+.file-time-locked.active { background: #441c2a; box-shadow: inset 0 3px #ff7a8a; }
+.file-time-locked small { color: #ff9ead; }
+.file-time-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ffffff; box-shadow: 0 0 7px #a2c8ff, 0 0 2px #fff; cursor: ew-resize; z-index: 4; transform: translateX(-1px); pointer-events: auto; }
+.file-time-playhead::before { content: ''; position: absolute; top: 0; bottom: 0; left: -9px; right: -9px; }
+.file-time-playhead::after { content: ''; position: absolute; top: 0; left: 50%; width: 10px; height: 7px; border-radius: 0 0 4px 4px; background: #ffffff; box-shadow: 0 0 6px #a2c8ff; transform: translateX(-50%); }
 .file-time-marker:focus-visible { outline: 2px solid #bbd4ff; outline-offset: -3px; z-index: 3; }
 .file-playback-summary { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding-top: 8px; color: #aabddd; font-size: 12px; min-width: 0; }
 .file-playback-summary > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -2286,3 +2292,52 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 
 
 
+
+/* ============ Hacked Screen Project ============ */
+.project-type-choices-main { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.hack-project-thumb {
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 255, 102, 0.06) 0 2px, transparent 2px 5px),
+    radial-gradient(circle at 50% 40%, #3a0710, #0a0103 72%);
+  color: #ff4d64 !important;
+}
+.hack-project-thumb .ico svg { width: 64px; height: 64px; filter: drop-shadow(0 0 10px rgba(255, 31, 61, 0.7)); animation: hack-thumb-pulse 1.2s steps(2) infinite; }
+.hack-project-thumb .file-project-label { color: #00ff66; text-shadow: 0 0 8px rgba(0, 255, 102, 0.6); }
+@keyframes hack-thumb-pulse { 50% { opacity: 0.55; } }
+.hack-editor .file-work-center { display: flex; flex-direction: column; gap: 18px; overflow: auto; }
+.hack-phases { position: relative; display: flex; height: 38px; margin-top: 12px; border-radius: 9px; overflow: hidden; border: 1px solid #31425f; background: #101b2e; cursor: ew-resize; user-select: none; touch-action: none; }
+.hack-phase { position: relative; border: 0; border-right: 1px solid rgba(255, 255, 255, 0.08); color: #e6eeff; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; cursor: ew-resize; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 8px; min-width: 0; transition: filter 0.15s; user-select: none; }
+.hack-phase:hover { filter: brightness(1.25); }
+.hack-phase small { display: block; font-weight: 400; opacity: 0.75; font-size: 10px; }
+.hack-phase.start { background: linear-gradient(180deg, #14532d, #0d3a20); }
+.hack-phase.start.blue { background: linear-gradient(180deg, #1e3a8a, #132760); }
+.hack-phase.start.black, .hack-phase.start.image { background: linear-gradient(180deg, #2a3142, #1a1f2b); }
+.hack-phase.start.transparent { background: repeating-conic-gradient(#ffffff 0 25%, #c8c8c8 0 50%) 0 0 / 12px 12px; color: #111; text-shadow: 0 0 3px #fff; }
+/* Transparent preview: classic checkerboard where pixels have alpha 0 */
+.stage-frame.is-transparent { background: repeating-conic-gradient(#ffffff 0 25%, #cbcbcb 0 50%) 0 0 / 32px 32px; }
+.transparent-badge { display: none; position: absolute; top: 12px; left: 12px; z-index: 2; align-items: center; gap: 7px; padding: 5px 10px 5px 6px; border-radius: 999px; background: rgba(10, 14, 24, 0.82); border: 1px solid rgba(255, 255, 255, 0.25); color: #fff; font: 600 11px/1 "Outfit", sans-serif; letter-spacing: 0.08em; pointer-events: none; backdrop-filter: blur(4px); }
+.transparent-badge i { width: 16px; height: 16px; border-radius: 4px; background: repeating-conic-gradient(#ffffff 0 25%, #b5b5b5 0 50%) 0 0 / 8px 8px; }
+.stage-frame.is-transparent .transparent-badge { display: inline-flex; }
+.hack-phase.glitch { background: repeating-linear-gradient(90deg, #5b1a6e 0 6px, #1b7a8a 6px 9px, #3a0f4a 9px 14px); }
+.hack-phase.hacked { background: linear-gradient(180deg, #7a0f1f, #4a0612); }
+.hack-phase.outro { background: linear-gradient(180deg, #2b2b33, #111117); }
+.hack-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 8px #fff, 0 0 2px #fff; cursor: ew-resize; z-index: 4; transform: translateX(-1px); pointer-events: auto; }
+.hack-playhead::before { content: ''; position: absolute; top: 0; bottom: 0; left: -9px; right: -9px; }
+.hack-playhead::after { content: ''; position: absolute; top: 0; left: 50%; width: 10px; height: 7px; border-radius: 0 0 4px 4px; background: #ffffff; box-shadow: 0 0 6px #ffffff; transform: translateX(-50%); }
+.hack-bg-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); gap: 6px; }
+.hack-bg-choice { display: grid; gap: 6px; justify-items: center; padding: 8px 4px; border-radius: 9px; border: 1px solid #304464; background: #0d1628; color: #c9d7ef; font-size: 11px; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.hack-bg-choice i { width: 100%; height: 28px; border-radius: 5px; border: 1px solid rgba(255, 255, 255, 0.15); }
+.hack-bg-choice:hover { border-color: #5477ad; }
+.hack-bg-choice.on { border-color: #82b1ff; background: #203659; box-shadow: inset 0 0 0 1px #82b1ff; color: #fff; }
+.hack-color-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hack-color-row input[type="color"] { width: 100%; height: 34px; border: 1px solid #304464; border-radius: 8px; background: #0d1628; padding: 2px; cursor: pointer; }
+.hack-toggles { display: grid; gap: 4px; }
+.hack-end-choices { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.hack-bg-choice { white-space: nowrap; }
+.hack-end-preview.hold { background: radial-gradient(circle at 50% 55%, #ff1f3d 0 16%, transparent 18%), linear-gradient(180deg, #2a0710, #10020a); }
+.hack-end-preview.glitch_out { background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.16) 0 2px, transparent 2px 6px), linear-gradient(90deg, #4a0612 0 38%, #b8327a 46%, #1b7a8a 54%, #00b140 62%); }
+.hack-end-preview.black { background: linear-gradient(90deg, #4a0612, #000 85%); }
+/* Hack preview: size by available height so the play controls + phase bar stay visible */
+.hack-editor .file-work-center { padding: 20px 24px; }
+.hack-editor .file-stage-frame { width: min(100%, calc((100dvh - 215px) * 16 / 9)); max-height: none; margin: 0 auto; }
+.hack-editor .file-preview-section { max-width: 1600px; width: 100%; margin: 0 auto; }

@@ -173,8 +173,9 @@ export async function createFileScene(canvas, images, options = {}) {
   const drawEmailViewer = (item, t, openAt, hold, count) => {
     const elapsed = Math.max(0, t - openAt);
     const isScrambled = item.scrambled !== false;
-    const tick = Math.floor(t * 6);
-    const maybeScramble = (str, seed) => (isScrambled ? scrambleText(str, tick, seed) : String(str ?? ''));
+    const isStatic = item.scrambleStatic === true;
+    const tick = isStatic ? 0 : Math.floor(t * 6);
+    const maybeScramble = (str, seed) => (isScrambled ? scrambleText(str, tick, seed, !isStatic) : String(str ?? ''));
 
     // Simple, clean Email UI: Header box + Body box
     const boxX = 216, boxW = 1488;
@@ -219,6 +220,75 @@ export async function createFileScene(canvas, images, options = {}) {
     if (pressed) { g.strokeStyle = colors.accent; g.lineWidth = 3; g.beginPath(); g.arc(x, y, 25, 0, Math.PI * 2); g.stroke(); }
     g.beginPath(); g.moveTo(x, y); g.lineTo(x + 2, y + 34); g.lineTo(x + 10, y + 26); g.lineTo(x + 18, y + 42); g.lineTo(x + 25, y + 38); g.lineTo(x + 17, y + 23); g.lineTo(x + 30, y + 22); g.closePath();
     g.fillStyle = '#fff'; g.strokeStyle = '#06100b'; g.lineWidth = 2; g.fill(); g.stroke();
+  }
+
+  function drawFolderPadlock(folderX, folderY, unlocked = false) {
+    const cx = folderX + 37;
+    g.save();
+    g.strokeStyle = colors.bg;
+    g.lineWidth = 3.4;
+    g.lineCap = 'round';
+    g.beginPath();
+    if (unlocked) {
+      g.arc(cx + 3.5, folderY + 15, 7, Math.PI, 0, false);
+      g.lineTo(cx + 10.5, folderY + 25);
+    } else {
+      g.arc(cx, folderY + 19, 7.5, Math.PI, 0, false);
+      g.lineTo(cx + 7.5, folderY + 25);
+      g.moveTo(cx - 7.5, folderY + 19);
+      g.lineTo(cx - 7.5, folderY + 25);
+    }
+    g.stroke();
+
+    g.fillStyle = colors.bg;
+    g.beginPath();
+    g.roundRect(cx - 12, folderY + 24, 24, 19, 3.5);
+    g.fill();
+
+    g.fillStyle = colors.accent;
+    g.beginPath();
+    g.arc(cx, folderY + 31.5, 2.3, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(cx - 1.2, folderY + 32.5, 2.4, 5.5);
+    g.restore();
+  }
+
+  function drawModalPadlock(cx, cy, col = '#ff4d4d') {
+    g.save();
+    g.strokeStyle = col;
+    g.lineWidth = 4.5;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.arc(cx, cy - 10, 11, Math.PI, 0, false);
+    g.lineTo(cx + 11, cy);
+    g.moveTo(cx - 11, cy - 10);
+    g.lineTo(cx - 11, cy);
+    g.stroke();
+
+    g.fillStyle = col;
+    g.beginPath();
+    g.roundRect(cx - 18, cy - 2, 36, 28, 5);
+    g.fill();
+
+    g.fillStyle = colors.bg;
+    g.beginPath();
+    g.arc(cx, cy + 9, 3.4, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(cx - 1.8, cy + 11, 3.6, 8);
+    g.restore();
+  }
+
+  function drawLockedModal(s, t) {
+    const deniedElapsed = Math.max(0, t - s.lockDenied);
+    const shake = deniedElapsed < 0.24 ? Math.round(Math.sin(deniedElapsed * 52) * 8 * (1 - deniedElapsed / 0.24)) : 0;
+    const red = '#ff4d4d';
+    g.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    g.fillRect(60, 118, 1800, 902);
+    const mw = 500, mh = 132;
+    const mx = Math.round((W - mw) / 2) + shake, my = Math.round((H - mh) / 2);
+    rect(mx, my, mw, mh, colors.bg, red, 2.5);
+    drawModalPadlock(mx + 92, my + 64, red);
+    text('ACCESS DENIED', mx + 134, my + 79, 40, red, 'bold');
   }
 
   function intro(t) {
@@ -307,8 +377,11 @@ export async function createFileScene(canvas, images, options = {}) {
       text('ARCHIVE / ROOT', 420, 286, 22, colors.muted);
       folders.slice(rootFolderOffset, rootFolderOffset + 12).forEach((folder, index) => {
         const x = 438 + index % 4 * 340, y = 370 + Math.floor(index / 4) * 185;
-        const hovered = folder === s?.folder && cursor?.hover === 'folder';
-        const selected = folder === s?.folder && t >= s.folderClick;
+        const isTargetFolder = folder === s?.folder;
+        const isLockedNow = isTargetFolder && s?.locked && t < s.cut;
+        const isUnlockedNow = isTargetFolder && s?.locked && t >= s.cut;
+        const hovered = isTargetFolder && cursor?.hover === 'folder';
+        const selected = isTargetFolder && (isLockedNow ? t >= s.lockClick : t >= s?.folderClick);
         if (hovered || selected) {
           g.save();
           if (hovered) { g.shadowColor = colors.accent; g.shadowBlur = 14; }
@@ -316,6 +389,11 @@ export async function createFileScene(canvas, images, options = {}) {
           g.restore();
         }
         rect(x, y, 74, 52, colors.accent); rect(x, y - 12, 35, 15, colors.accent);
+        if (isLockedNow) {
+          drawFolderPadlock(x, y, false);
+        } else if (isUnlockedNow) {
+          drawFolderPadlock(x, y, true);
+        }
         text(fit(displayFileFolder(folder), 292, 23), x, y + 99, 23);
       });
     }
@@ -324,6 +402,9 @@ export async function createFileScene(canvas, images, options = {}) {
     text(`SEQUENCE ${count}/${items.length}`, 1520, 993, 21, colors.muted);
     if (s) {
       const phase = state.phase;
+      if (phase === 'locked') {
+        drawLockedModal(s, t);
+      }
       const viewer = !s.noOpen && (phase === 'image' || (phase === 'close' && t < s.closeClick));
       if (viewer) {
         g.fillStyle = '#000a'; g.fillRect(60, 118, 1800, 902);

@@ -23,7 +23,9 @@ export async function mount(root, { id, project, exportingView = false }) {
   if (!project.file_opts?.folders && images.some((i) => i.folder === 'Bestanden')) opts.folders = ['Bestanden'];
 
   function activeItems() {
-    return getActiveFileItems(images, opts);
+    if (opts.variant === 'login_log') return opts.logs;
+    if (opts.variant === 'email') return opts.emails;
+    return images;
   }
   function defaultFolderForVariant() {
     return opts.variant === 'login_log' ? 'Logs' : opts.variant === 'email' ? 'Inbox' : 'Files';
@@ -122,7 +124,9 @@ export async function mount(root, { id, project, exportingView = false }) {
   input.addEventListener('change', () => { trackEdit(upload(input.files)); input.value = ''; });
 
   const canvas = h('canvas', { width: 1920, height: 1080, id: 'file-canvas', 'aria-label': 'File Terminal video preview' });
-  const play = h('button', { class: 'btn btn-sm', id: 'file-play-btn', onclick: togglePlay }, icon('play'), 'Play preview');
+  const play = h('button', { class: 'btn btn-sm', id: 'file-play-btn', onclick: () => togglePlay() }, icon('play'), 'Play preview');
+  const playPart1Btn = h('button', { class: 'btn btn-sm btn-ghost', id: 'file-play-part1-btn', hidden: !opts.folderLocked, title: 'Speel alleen Deel 1 (tot de vergrendelde map / knip)', onclick: () => togglePlay(1) }, icon('lock'), 'Deel 1 (tot knip)');
+  const playPart2Btn = h('button', { class: 'btn btn-sm btn-ghost', id: 'file-play-part2-btn', hidden: !opts.folderLocked, title: 'Speel alleen Deel 2 (na kraken — map openen)', onclick: () => togglePlay(2) }, icon('unlock'), 'Deel 2 (na kraken)');
   const scrub = h('input', { type: 'range', min: 0, max: 0, step: 0.02, value: 0, 'aria-label': 'Playback position', id: 'file-scrub' });
   const time = h('span', { class: 'mono' }, '0:00 / 0:00');
   const timeline = h('div', { class: 'file-playback-timeline', 'aria-label': 'File timestamps' });
@@ -135,7 +139,7 @@ export async function mount(root, { id, project, exportingView = false }) {
   const preview = h('section', { class: 'file-preview-section' },
     h('div', { class: 'file-section-heading' }, h('b', {}, exportingView ? 'Export preview' : 'Live preview'), h('span', { class: 'hint' }, 'Inlog intro → File Explorer → Bestand openen')),
     h('div', { class: 'stage-frame file-stage-frame' }, canvas),
-    h('div', { class: 'file-preview-controls' }, play, scrub, time), timeline,
+    h('div', { class: 'file-preview-controls' }, play, playPart1Btn, playPart2Btn, scrub, time), timeline,
     h('div', { class: 'file-playback-summary' }, currentLabel, exportingView ? null : renameCurrent));
   const center = h('section', { class: 'center file-work-center' }, exportingView ? null : explorer, preview,
     exportingView ? null : h('section', { class: 'file-sequence' }, h('div', { class: 'file-section-heading' }, h('b', {}, 'Playback order'), sequenceSummary), h('p', { class: 'hint' }, 'Drag to reorder or use the arrows. Viewing time excludes opening and closing.'), sequence));
@@ -205,27 +209,27 @@ export async function mount(root, { id, project, exportingView = false }) {
     if (opts.variant === 'login_log') {
       leftHint.textContent = 'Start met inlog → opent File Explorer → opent het inlog-/systeemlogboek.';
       fileFormatHelp.replaceChildren('Inlog Log modus', h('br'), 'Pas tijdstippen, gebruikers, IP\'s en status aan in het rechterpaneel.');
-      explorerActions.replaceChildren(addLogBtn);
+      explorerActions.replaceChildren(folderLockedToggle('🔒 Map vergrendeld', 'explorer-folder-locked'), addLogBtn);
       dropHint.textContent = 'Klik op een logbestand om de inlogregels en meldingen rechts te bewerken.';
     } else if (opts.variant === 'email') {
       leftHint.textContent = 'Start met inlog → opent File Explorer → opent het e-mailbericht.';
       fileFormatHelp.replaceChildren('E-mail modus', h('br'), 'Pas afzender, onderwerp, classificatie en berichttekst rechts aan.');
-      explorerActions.replaceChildren(addEmailBtn);
+      explorerActions.replaceChildren(folderLockedToggle('🔒 Map vergrendeld', 'explorer-folder-locked'), addEmailBtn);
       dropHint.textContent = 'Klik op een e-mail om afzender, onderwerp en berichttekst rechts te bewerken.';
     } else {
       leftHint.textContent = 'Create folders and add images. The export navigates through them automatically.';
       fileFormatHelp.replaceChildren('JPG, PNG and WebP', h('br'), 'Max. 30 MB per image');
-      explorerActions.replaceChildren(uploadBtn);
+      explorerActions.replaceChildren(folderLockedToggle('🔒 Map vergrendeld', 'explorer-folder-locked'), uploadBtn);
       dropHint.textContent = 'Drop images here to add them to this folder.';
     }
 
-    path.textContent = `ARCHIVE / ${displayFileFolder(folder)}`;
+    path.textContent = `ARCHIVE / ${displayFileFolder(folder)}${opts.folderLocked ? ' 🔒 (VERGRENDELD → 2 DELEN)' : ''}`;
     folderList.replaceChildren(...folders.map((f) => h('button', {
       class: `file-folder${folder === f ? ' on' : ''}`,
       'aria-pressed': String(folder === f),
       'data-folder': f,
       onclick: () => { folder = f; paintFiles(); }
-    }, icon('folder'), h('span', {}, displayFileFolder(f)), h('small', {}, items.filter((i) => (i.folder || defaultFolderForVariant()) === f).length))));
+    }, icon(opts.folderLocked ? 'lock' : 'folder'), h('span', {}, displayFileFolder(f)), h('small', {}, items.filter((i) => (i.folder || defaultFolderForVariant()) === f).length))));
 
     const filtered = items.filter((i) => (i.folder || defaultFolderForVariant()) === folder);
     grid.replaceChildren(...filtered.map((item) => h('button', {
@@ -279,7 +283,11 @@ export async function mount(root, { id, project, exportingView = false }) {
     const items = activeItems();
     const schedule = fileSchedule(images, opts);
     const unitLabel = opts.variant === 'login_log' ? 'logs' : opts.variant === 'email' ? 'e-mails' : 'images';
-    sequenceSummary.textContent = `${items.length} ${unitLabel} · ${fmtTime(schedule.total, true)} total`;
+    sequenceSummary.textContent = opts.folderLocked && schedule.cut
+      ? `${items.length} ${unitLabel} · 2 delen (Deel 1: ${fmtTime(schedule.cut, true)} · Deel 2: ${fmtTime(schedule.total - schedule.cut, true)})`
+      : `${items.length} ${unitLabel} · ${fmtTime(schedule.total, true)} total`;
+    playPart1Btn.hidden = !opts.folderLocked;
+    playPart2Btn.hidden = !opts.folderLocked;
     sequence.replaceChildren(...items.map((item, index) => h('div', {
       class: `file-sequence-item${selected === item.id ? ' on' : ''}`,
       draggable: true,
@@ -313,22 +321,37 @@ export async function mount(root, { id, project, exportingView = false }) {
     const items = activeItems();
     timelineTrack.replaceChildren();
     timeline.hidden = !items.length;
-    timelineTrack.style.minWidth = Math.max(0, items.length * 150 + (schedule.intro ? 100 : 0) + (schedule.outro ? 150 : 0)) + 'px';
+    timelineTrack.style.minWidth = Math.max(0, items.length * 150 + (schedule.intro ? 100 : 0) + (schedule.cut ? 160 : 0) + (schedule.outro ? 150 : 0)) + 'px';
     const percent = (t) => (t / (schedule.total || 1)) * 100 + '%';
-    const marker = (label, start, end, content, onclick, extra = {}) => h('button', { class: 'file-time-marker', type: 'button', title: label, 'aria-label': label,
-      style: { left: percent(start), width: percent(end - start) }, onclick, ...extra }, content);
+    const marker = (label, start, end, content, ondblclick, extra = {}) => h('button', { class: 'file-time-marker', type: 'button', title: `${label} (sleep om precies te bewegen, dubbelklik om naar onderdeel te springen)`, 'aria-label': label,
+      style: { left: percent(start), width: percent(end - start) }, ondblclick, ...extra }, content);
     if (schedule.intro) timelineTrack.append(marker(`Login intro · ${fmtTime(0, true)}–${fmtTime(schedule.intro, true)}`, 0, schedule.intro,
       [h('small', { class: 'mono' }, '0:00.0'), h('b', {}, 'Login intro')], () => { stop(); draw(0); }, { class: 'file-time-marker file-time-intro' }));
     schedule.segments.forEach((s, index) => {
+      if (s.locked) {
+        timelineTrack.append(marker(
+          `Deel 1 · Map "${displayFileFolder(s.folder)}" vergrendeld · Knip op ${fmtTime(s.cut, true)}`,
+          s.start,
+          s.cut,
+          [
+            h('small', { class: 'mono' }, `${fmtTime(s.start, true)} → ✂ ${fmtTime(s.cut, true)}`),
+            h('b', {}, `🔒 Map vergrendeld (Knip)`),
+          ],
+          () => { stop(); draw(s.lockDenied + 0.3); },
+          { class: 'file-time-marker file-time-locked', 'data-timeline-locked': '' }
+        ));
+      }
+      const segStart = s.locked ? s.cut : s.start;
       const range = `${fmtTime(s.open, true)}–${fmtTime(s.closeClick, true)}`;
-      timelineTrack.append(marker(`${s.image.name} · ${range} · viewing time ${s.hold.toFixed(1)}s`, s.start, s.end,
-        [h('i', { class: 'file-time-visible', style: { left: ((s.open - s.start) / (s.end - s.start)) * 100 + '%', width: ((s.closeClick - s.open) / (s.end - s.start)) * 100 + '%' } }),
-          h('small', { class: 'mono' }, fmtTime(s.open, true)), h('b', {}, `${index + 1}. ${s.image.name}`)],
+      const labelPrefix = s.locked ? '🔓 Deel 2 · ' : '';
+      timelineTrack.append(marker(`${labelPrefix}${s.image.name} · ${range} · viewing time ${s.hold.toFixed(1)}s`, segStart, s.end,
+        [h('i', { class: 'file-time-visible', style: { left: ((s.open - segStart) / (s.end - segStart)) * 100 + '%', width: ((s.closeClick - s.open) / (s.end - segStart)) * 100 + '%' } }),
+          h('small', { class: 'mono' }, fmtTime(s.open, true)), h('b', {}, `${labelPrefix}${index + 1}. ${s.image.name}`)],
         () => { stop(); selected = s.image.id; folder = s.folder; draw(s.open); if (!exportingView) { paintFiles(); paintSettings(); } }, { 'data-timeline-image': s.image.id, 'data-start': s.open.toFixed(3), 'data-end': s.closeClick.toFixed(3) }));
     });
     if (schedule.outro) timelineTrack.append(marker(`Logout outro · ${fmtTime(schedule.outro.start, true)}–${fmtTime(schedule.outro.end, true)}`, schedule.outro.start, schedule.outro.end,
       [h('small', { class: 'mono' }, fmtTime(schedule.outro.start, true)), h('b', {}, 'Logout outro')], () => { stop(); draw(schedule.outro.start); }, { class: 'file-time-marker file-time-intro', 'data-timeline-outro': '' }));
-    const playhead = h('i', { class: 'file-time-playhead', style: { left: percent(+scrub.value) } });
+    const playhead = h('i', { class: 'file-time-playhead', title: 'Sleep om precies door de tijdlijn te bewegen', style: { left: percent(+scrub.value) } });
     timelineTrack.append(playhead);
     if (scene) draw(+scrub.value);
   }
@@ -395,6 +418,15 @@ export async function mount(root, { id, project, exportingView = false }) {
 
   function optionChanged() { persist(); paintSequence(); changedPreview(); }
   const toggle = (label, key, idAttr) => h('label', { class: 'toggle' }, h('input', { type: 'checkbox', id: idAttr, checked: opts[key], disabled: exporting, onchange: (e) => { opts[key] = e.target.checked; optionChanged(); paintSettings(); } }), h('span', { class: 'track' }), label);
+  const setFolderLocked = (on) => {
+    opts.folderLocked = on;
+    optionChanged();
+    paintFiles();
+    paintSettings();
+  };
+  const folderLockedToggle = (label, idAttr) => h('label', { class: 'toggle' },
+    h('input', { type: 'checkbox', id: idAttr, checked: Boolean(opts.folderLocked), disabled: exporting, onchange: (e) => setFolderLocked(e.target.checked) }),
+    h('span', { class: 'track' }), label);
   // "Stop on open" and "end while open" are mutually exclusive endings.
   const setEnding = (key, on) => {
     opts[key] = on;
@@ -445,6 +477,8 @@ export async function mount(root, { id, project, exportingView = false }) {
     });
 
     card.append(
+      folderLockedToggle('Map vergrendeld (knip & export in 2 delen)', 'log-folder-locked'),
+      h('p', { class: 'hint' }, 'De map kan eerst niet open (Deel 1). Na de knip is de map gekraakt en gaat hij wel open (Deel 2).'),
       h('label', { class: 'field' }, 'Bestandsnaam', h('input', {
         class: 'input',
         value: logItem.name,
@@ -531,22 +565,43 @@ export async function mount(root, { id, project, exportingView = false }) {
       paintFiles();
     };
     card.append(
+      folderLockedToggle('Map vergrendeld (knip & export in 2 delen)', 'email-folder-locked'),
+      h('p', { class: 'hint' }, 'De map kan eerst niet open (Deel 1). Na de knip is de map gekraakt en gaat hij wel open (Deel 2).'),
       stopOnOpenToggle('Stop bij openen (toon geopende e-mail niet)', 'email-stop-on-open'),
       h('p', { class: 'hint' }, 'Stopt de animatie precies op het moment dat er op de e-mail wordt gedubbelklikt in de verkenner.'),
       ...endWhileOpenControls('email'),
       h('label', { class: 'toggle' },
         h('input', {
           type: 'checkbox',
+          id: 'email-scrambled',
           checked: emailItem.scrambled !== false,
           onchange: (e) => {
             emailItem.scrambled = e.target.checked;
+            if (!emailItem.scrambled) emailItem.scrambleStatic = false;
             syncEmail();
+            paintSettings();
           }
         }),
         h('span', { class: 'track' }),
         'Tekst scramblen / gecodeerd (onleesbaar)'
       ),
       h('p', { class: 'hint' }, 'Standaard aan voor de missie: vervangt alle tekst in de e-mail door onleesbare cipher-tekens.'),
+      h('label', { class: 'toggle' },
+        h('input', {
+          type: 'checkbox',
+          id: 'email-scramble-static',
+          checked: Boolean(emailItem.scrambleStatic),
+          onchange: (e) => {
+            emailItem.scrambleStatic = e.target.checked;
+            if (emailItem.scrambleStatic) emailItem.scrambled = true;
+            syncEmail();
+            paintSettings();
+          }
+        }),
+        h('span', { class: 'track' }),
+        'Stilstaand gehusseld (geen flikker-animatie)'
+      ),
+      h('p', { class: 'hint' }, 'Toont de gehusselde e-mail als vaste tekst zonder het flikkerende hussel-effect.'),
       h('label', { class: 'field' }, 'Bestandsnaam in Explorer', h('input', {
         class: 'input',
         value: emailItem.name,
@@ -625,7 +680,11 @@ export async function mount(root, { id, project, exportingView = false }) {
         settings.append(renderSelectedEmailSettings(activeItem));
       } else {
         const image = images.find((i) => i.id === selected);
-        const imageCard = h('div', { class: 'insp-card file-selected-settings' }, h('h6', {}, 'Selected image'));
+        const imageCard = h('div', { class: 'insp-card file-selected-settings' },
+          h('h6', {}, 'Selected image'),
+          folderLockedToggle('Map vergrendeld (knip & export in 2 delen)', 'image-folder-locked'),
+          h('p', { class: 'hint' }, 'De map kan eerst niet open (Deel 1). Na de knip is de map gekraakt en gaat hij wel open (Deel 2).')
+        );
         if (image) {
           const update = (data) => trackEdit((async () => {
             try { const updated = await api.updateImage(image.id, data); images = images.map((i) => i.id === image.id ? updated : i); if (data.folder) folder = updated.folder; await persist(); paintFiles(); paintSettings(); changedPreview(); } catch (e) { toast(e.message, 'err'); paintSettings(); throw e; }
@@ -661,6 +720,8 @@ export async function mount(root, { id, project, exportingView = false }) {
       h('label', { class: 'field' }, 'Explorer title', h('input', { class: 'input', value: opts.title, maxlength: 70, disabled: exporting, onchange: (e) => { opts.title = e.target.value || 'CLASSIFIED FILE ARCHIVE'; optionChanged(); } })),
       toggle('Show login intro', 'intro', 'file-intro'), h('p', { class: 'hint' }, 'System Login → username → masked password → file list → explorer.'),
       opts.intro ? h('label', { class: 'field' }, 'Intro username', h('input', { class: 'input', id: 'file-username', maxlength: 30, value: opts.username, disabled: exporting, onchange: (e) => { opts.username = e.target.value || 'operator'; optionChanged(); } })) : null,
+      folderLockedToggle('Map vergrendeld (exporteert in 2 delen)', 'file-folder-locked'),
+      h('p', { class: 'hint' }, 'Eerste poging om de map te openen weigert toegang (Deel 1). Na de knip is de map gekraakt en gaat hij wel open (Deel 2).'),
       stopOnOpenToggle('Stop bij openen (toon inhoud niet)', 'file-stop-on-open'), h('p', { class: 'hint' }, 'Stopt de animatie zodra het bestand wordt aangeklikt om te openen — het geopende venster komt niet in beeld.'),
       ...endWhileOpenControls('general'),
       toggle('Show logout outro', 'outro', 'file-outro'), h('p', { class: 'hint' }, 'Close the viewer and explorer, log out, then finish on an empty black terminal.'),
@@ -673,18 +734,53 @@ export async function mount(root, { id, project, exportingView = false }) {
 
   function paintExportSettings() {
     const items = activeItems();
+    const sched = fileSchedule(images, opts);
     const unitLabel = opts.variant === 'login_log' ? 'logs' : opts.variant === 'email' ? 'e-mails' : 'images';
+    const isTwoPart = Boolean(opts.folderLocked && sched.cut > 0);
     expButton.disabled = !items.length || !scene || (exportType === 'video' && !exportSupported());
-    expButton.replaceChildren(icon(exporting ? 'stop' : 'download'), exporting ? 'Cancel' : exportType === 'video' ? 'Export MP4' : `Export ${audioFormat.toUpperCase()}`);
+    expButton.replaceChildren(
+      icon(exporting ? 'stop' : 'download'),
+      exporting
+        ? 'Cancel'
+        : isTwoPart
+          ? (exportType === 'video' ? 'Export 2 MP4\'s (Deel 1 & Deel 2)' : `Export 2 ${audioFormat.toUpperCase()}'s (Deel 1 & Deel 2)`)
+          : (exportType === 'video' ? 'Export MP4' : `Export ${audioFormat.toUpperCase()}`)
+    );
+    const summaryText = isTwoPart
+      ? `${items.length} ${unitLabel} · 2 delen · Deel 1: ${fmtTime(sched.cut, true)} (tot vergrendelde map) + Deel 2: ${fmtTime(sched.total - sched.cut, true)} (na kraken)`
+      : `${items.length} ${unitLabel} · ${fmtTime(sched.total, true)}`;
     settings.prepend(h('div', { class: 'insp-card' }, h('h6', {}, 'Export file'),
       h('div', { class: 'seg' }, ...[['video', 'Video with explorer'], ['audio', 'Sound only']].map(([key, label]) => h('button', { class: exportType === key ? 'on' : '', disabled: exporting, 'data-export-type': key, onclick: () => { exportType = key; paintSettings(); } }, label))),
       exportType === 'video' ? h('label', { class: 'field' }, 'Quality', h('select', { class: 'select', id: 'file-quality', disabled: exporting, onchange: (e) => { quality = e.target.value; } }, ...[['1080', '1080p Full HD'], ['2160', '4K Ultra HD']].map(([value, label]) => h('option', { value, selected: value === quality }, label)))) :
         h('label', { class: 'field' }, 'File format', h('select', { class: 'select', disabled: exporting, onchange: (e) => { audioFormat = e.target.value; paintSettings(); } }, ...['wav', 'mp3'].map((key) => h('option', { value: key, selected: key === audioFormat }, key.toUpperCase())))),
       exportType === 'video' ? h('label', { class: 'field' }, 'Framerate', h('select', { class: 'select', id: 'file-fps', disabled: exporting, onchange: (e) => { fps = +e.target.value; } }, ...[30, 60].map((value) => h('option', { value, selected: value === fps }, `${value} FPS`)))) : h('p', { class: 'hint' }, 'Only the navigation sounds from this sequence, without video.'),
-      h('p', { class: 'hint', id: 'file-export-summary' }, `${items.length} ${unitLabel} · ${fmtTime(fileSchedule(images, opts).total, true)}`), expProgress, expStatus, expButton,
+      h('p', { class: 'hint', id: 'file-export-summary' }, summaryText), expProgress, expStatus, expButton,
       !items.length ? h('p', { class: 'hint' }, 'Add files in the editor first.') : null,
       exportType === 'video' && !exportSupported() ? h('p', { class: 'bt-warn' }, 'Video export requires Chrome or Edge.') : null));
-    const list = h('div', { class: 'insp-card' }, h('h6', {}, `Saved exports (${exports.length})`));
+    const listHead = h('div', { class: 'file-section-heading', style: { marginBottom: '4px' } },
+      h('h6', {}, `Saved exports (${exports.length})`),
+      exports.length > 1
+        ? h('button', {
+            type: 'button',
+            class: 'btn btn-sm btn-ghost',
+            disabled: exporting,
+            onclick: () => {
+              exports.forEach((exp, idx) => {
+                setTimeout(() => {
+                  const a = document.createElement('a');
+                  a.href = fileUrl.export(exp);
+                  a.download = exp.filename;
+                  document.body.append(a);
+                  a.click();
+                  a.remove();
+                }, idx * 220);
+              });
+              toast(`${exports.length} downloads gestart`, 'ok');
+            },
+          }, icon('download'), 'Download alles')
+        : null
+    );
+    const list = h('div', { class: 'insp-card' }, listHead);
     if (!exports.length) list.append(h('p', { class: 'hint' }, 'Your exports appear here with download links.'));
     exports.forEach((exp) => list.append(h('div', { class: 'export-item' },
       h('div', { class: 'info' }, h('div', { class: 'name' }, exp.filename), h('div', { class: 'sub' }, `${exp.scene === 'audio' ? exp.filename.split('.').pop().toUpperCase() : exp.height + 'p · ' + exp.fps + ' FPS'} · ${fmtTime(exp.duration)} · ${fmtSize(exp.size)}`)),
@@ -696,7 +792,13 @@ export async function mount(root, { id, project, exportingView = false }) {
     settings.append(list);
   }
 
-  function stop() { player.pause(); cancelAnimationFrame(raf); play.replaceChildren(icon('play'), 'Play preview'); }
+  function stop() {
+    player.pause();
+    cancelAnimationFrame(raf);
+    play.replaceChildren(icon('play'), 'Play preview');
+    playPart1Btn.replaceChildren(icon('lock'), 'Deel 1 (tot knip)');
+    playPart2Btn.replaceChildren(icon('unlock'), 'Deel 2 (na kraken)');
+  }
   function draw(t) {
     if (!scene) return;
     t = Math.max(0, Math.min(scene.schedule.total, t)); scene.draw(t); scrub.value = t;
@@ -704,13 +806,26 @@ export async function mount(root, { id, project, exportingView = false }) {
     const state = sequenceAt(scene.schedule, t);
     currentImage = state.segment?.image || null;
     const finished = t >= (scene.schedule.segments.at(-1)?.end ?? Infinity);
-    currentLabel.textContent = state.phase === 'intro' ? 'Login intro' : state.phase === 'blank' ? 'Empty terminal' : state.phase === 'outro' ? 'Logging out' : finished ? 'Sequence complete' : currentImage ? `${state.phase === 'navigate' ? 'Opening' : state.phase === 'close' ? 'Closing' : 'Viewing'}: ${displayFileFolder(currentImage.folder || defaultFolderForVariant())} / ${currentImage.name}` : 'No files yet';
+    currentLabel.textContent = state.phase === 'intro' ? 'Login intro'
+      : state.phase === 'blank' ? 'Empty terminal'
+      : state.phase === 'outro' ? 'Logging out'
+      : state.phase === 'lock_navigate' ? `Deel 1 · Map openen (vergrendeld): ${displayFileFolder(currentImage?.folder || defaultFolderForVariant())}`
+      : state.phase === 'locked' ? `Deel 1 · Map vergrendeld (knip op ${fmtTime(scene.schedule.cut, true)})`
+      : finished ? 'Sequence complete'
+      : currentImage ? `${state.phase === 'navigate' ? 'Opening' : state.phase === 'close' ? 'Closing' : 'Viewing'}: ${displayFileFolder(currentImage.folder || defaultFolderForVariant())} / ${currentImage.name}`
+      : 'No files yet';
     renameCurrent.disabled = !currentImage || exporting;
     scrub.setAttribute('aria-valuetext', `${fmtTime(t, true)} · ${currentLabel.textContent}`);
     const playhead = timelineTrack.querySelector('.file-time-playhead');
     if (playhead) playhead.style.left = (t / (scene.schedule.total || 1)) * 100 + '%';
+    const isLockedPhase = state.phase === 'lock_navigate' || state.phase === 'locked';
+    const lockedMarker = timelineTrack.querySelector('[data-timeline-locked]');
+    if (lockedMarker) {
+      lockedMarker.classList.toggle('active', isLockedPhase);
+      if (isLockedPhase) lockedMarker.setAttribute('aria-current', 'true'); else lockedMarker.removeAttribute('aria-current');
+    }
     timelineTrack.querySelectorAll('[data-timeline-image]').forEach((el) => {
-      const active = Number(el.dataset.timelineImage) === currentImage?.id && !finished;
+      const active = !isLockedPhase && Number(el.dataset.timelineImage) === currentImage?.id && !finished;
       el.classList.toggle('active', active); if (active) el.setAttribute('aria-current', 'true'); else el.removeAttribute('aria-current');
     });
     const outroMarker = timelineTrack.querySelector('[data-timeline-outro]');
@@ -720,18 +835,72 @@ export async function mount(root, { id, project, exportingView = false }) {
       if (active) outroMarker.setAttribute('aria-current', 'true'); else outroMarker.removeAttribute('aria-current');
     }
   }
-  async function togglePlay() {
+  async function togglePlay(part = 0) {
     if (player.playing) return stop();
     const items = activeItems();
     if (!scene || !items.length) return;
+    const cut = scene.schedule.cut || 0;
+    const startAt = part === 1 ? 0 : part === 2 ? cut : (+scrub.value >= scene.schedule.total - 0.05 ? 0 : +scrub.value);
+    const stopAt = part === 1 && cut > 0 ? cut : scene.schedule.total;
     try {
-      await player.play(+scrub.value >= scene.schedule.total - 0.05 ? 0 : +scrub.value);
-      play.replaceChildren(icon('pause'), 'Pause');
-      const loop = () => { if (destroyed) return; draw(player.time); if (player.playing) raf = requestAnimationFrame(loop); else stop(); };
+      await player.play(startAt);
+      if (part === 1) playPart1Btn.replaceChildren(icon('pause'), 'Pause Deel 1');
+      else if (part === 2) playPart2Btn.replaceChildren(icon('pause'), 'Pause Deel 2');
+      else play.replaceChildren(icon('pause'), 'Pause');
+      const loop = () => {
+        if (destroyed) return;
+        if (part === 1 && cut > 0 && player.time >= stopAt) {
+          draw( Math.max(0, stopAt - 0.01) );
+          stop();
+          return;
+        }
+        draw(player.time);
+        if (player.playing) raf = requestAnimationFrame(loop);
+        else stop();
+      };
       raf = requestAnimationFrame(loop);
     } catch (e) { toast('Could not start preview: ' + e.message, 'err'); }
   }
   scrub.addEventListener('input', () => { stop(); draw(+scrub.value); });
+
+  let draggingTimeline = false;
+  const seekTimelineFromEvent = (e) => {
+    if (!scene) return;
+    const rect = timelineTrack.getBoundingClientRect();
+    if (!rect.width) return;
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    stop();
+    draw(ratio * scene.schedule.total);
+  };
+  timelineTrack.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !scene) return;
+    e.preventDefault();
+    draggingTimeline = true;
+    timelineTrack.classList.add('is-dragging');
+    try { timelineTrack.setPointerCapture(e.pointerId); } catch {}
+    seekTimelineFromEvent(e);
+  });
+  timelineTrack.addEventListener('pointermove', (e) => {
+    if (!draggingTimeline) return;
+    seekTimelineFromEvent(e);
+  });
+  const stopDraggingTimeline = (e) => {
+    if (!draggingTimeline) return;
+    draggingTimeline = false;
+    timelineTrack.classList.remove('is-dragging');
+    try { timelineTrack.releasePointerCapture(e.pointerId); } catch {}
+    if (scene && !exportingView) {
+      const state = sequenceAt(scene.schedule, +scrub.value);
+      if (state.segment && (selected !== state.segment.image.id || folder !== state.segment.folder)) {
+        selected = state.segment.image.id;
+        folder = state.segment.folder;
+        paintFiles();
+        paintSettings();
+      }
+    }
+  };
+  timelineTrack.addEventListener('pointerup', stopDraggingTimeline);
+  timelineTrack.addEventListener('pointercancel', stopDraggingTimeline);
   async function rebuild(keepTime = false) {
     clearTimeout(rebuildTimer); const version = ++sceneVersion; stop();
     const previousTime = keepTime ? +scrub.value : 0;
@@ -740,10 +909,14 @@ export async function mount(root, { id, project, exportingView = false }) {
       const next = await createFileScene(canvas, [...images], structuredClone(opts));
       if (destroyed || version !== sceneVersion) { next.dispose(); return; }
       scene?.dispose(); scene = next; player.load(scene.soundtrack); scrub.max = scene.schedule.total; paintTimeline(scene.schedule); draw(previousTime);
-      play.disabled = !activeItems().length; if (exportingView) paintSettings();
-    } catch (e) { if (version === sceneVersion && !destroyed) { scene?.dispose(); scene = null; play.disabled = true; expButton.disabled = true; toast('Preview failed: ' + e.message, 'err'); } }
+      const hasItems = Boolean(activeItems().length);
+      play.disabled = !hasItems;
+      playPart1Btn.disabled = !hasItems;
+      playPart2Btn.disabled = !hasItems;
+      if (exportingView) paintSettings();
+    } catch (e) { if (version === sceneVersion && !destroyed) { scene?.dispose(); scene = null; play.disabled = true; playPart1Btn.disabled = true; playPart2Btn.disabled = true; expButton.disabled = true; toast('Preview failed: ' + e.message, 'err'); } }
   }
-  function changedPreview() { stop(); play.disabled = true; if (exportingView) expButton.disabled = true; clearTimeout(rebuildTimer); rebuildTimer = setTimeout(() => rebuild(true), 100); }
+  function changedPreview() { stop(); play.disabled = true; playPart1Btn.disabled = true; playPart2Btn.disabled = true; if (exportingView) expButton.disabled = true; clearTimeout(rebuildTimer); rebuildTimer = setTimeout(() => rebuild(true), 100); }
   async function startExport() {
     if (exporting) return exportAbort?.abort();
     const items = activeItems();
@@ -757,10 +930,75 @@ export async function mount(root, { id, project, exportingView = false }) {
       onProgress(0, 'Preparing sequence…');
       const output = document.createElement('canvas'); output.width = quality === '2160' ? 3840 : 1920; output.height = quality === '2160' ? 2160 : 1080;
       rendered = await createFileScene(output, snapshot.images, snapshot.opts);
-      const result = exportType === 'audio'
-        ? await renderAudioExport({ projectId: id, pcm: rendered.soundtrack, format: audioFormat, signal: exportAbort.signal, onProgress })
-        : await renderCanvasExport({ projectId: id, canvas: output, scene: rendered, soundtrack: rendered.soundtrack, duration: rendered.schedule.total, width: output.width, height: output.height, fps, signal: exportAbort.signal, onProgress });
-      exports.unshift(result); toast('Export saved and ready to download.', 'ok');
+      const cut = rendered.schedule.cut || 0;
+      const total = rendered.schedule.total;
+      const sr = 48000;
+      const cutSample = Math.min(rendered.soundtrack.length, Math.round(cut * sr));
+      const parts = snapshot.opts.folderLocked && cut > 0 && cut < total
+        ? [
+            {
+              startTime: 0,
+              duration: cut,
+              soundtrack: rendered.soundtrack.slice(0, cutSample),
+              partLabel: 'deel-1-vergrendeld',
+              title: 'Deel 1/2 (Tot vergrendelde map)',
+            },
+            {
+              startTime: cut,
+              duration: total - cut,
+              soundtrack: rendered.soundtrack.slice(cutSample),
+              partLabel: 'deel-2-gekraakt',
+              title: 'Deel 2/2 (Na kraken — map openen)',
+            },
+          ]
+        : [
+            {
+              startTime: 0,
+              duration: total,
+              soundtrack: rendered.soundtrack,
+              partLabel: '',
+              title: '',
+            },
+          ];
+
+      for (let idx = 0; idx < parts.length; idx++) {
+        const part = parts[idx];
+        const partProgress = (p, label) => {
+          const overall = (idx + p) / parts.length;
+          onProgress(overall, part.title ? `${part.title} · ${label}` : label);
+        };
+        const result = exportType === 'audio'
+          ? await renderAudioExport({
+              projectId: id,
+              pcm: part.soundtrack,
+              format: audioFormat,
+              partLabel: part.partLabel,
+              signal: exportAbort.signal,
+              onProgress: partProgress,
+            })
+          : await renderCanvasExport({
+              projectId: id,
+              canvas: output,
+              scene: rendered,
+              soundtrack: part.soundtrack,
+              duration: part.duration,
+              startTime: part.startTime,
+              partLabel: part.partLabel,
+              width: output.width,
+              height: output.height,
+              fps,
+              signal: exportAbort.signal,
+              onProgress: partProgress,
+            });
+        exports.unshift(result);
+        if (!destroyed) paintSettings();
+      }
+      toast(
+        parts.length === 2
+          ? 'Beide delen (Deel 1 & Deel 2) zijn geëxporteerd en klaar om te downloaden!'
+          : 'Export saved and ready to download.',
+        'ok'
+      );
     } catch (e) { toast(e.name === 'AbortError' ? 'Export cancelled' : 'Export failed: ' + e.message, e.name === 'AbortError' ? 'info' : 'err'); }
     finally { rendered?.dispose(); exporting = false; exportAbort = null; expStatus.hidden = true; expProgress.hidden = true; if (!destroyed) paintSettings(); }
   }

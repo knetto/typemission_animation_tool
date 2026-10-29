@@ -76,6 +76,7 @@ export function openDb(file) {
   if (!columns.includes('type')) db.exec("ALTER TABLE projects ADD COLUMN type TEXT NOT NULL DEFAULT 'audio'");
   if (!columns.includes('file_opts')) db.exec("ALTER TABLE projects ADD COLUMN file_opts TEXT NOT NULL DEFAULT '{}'");
   if (!columns.includes('keyboard_opts')) db.exec("ALTER TABLE projects ADD COLUMN keyboard_opts TEXT NOT NULL DEFAULT '{}'");
+  if (!columns.includes('hack_opts')) db.exec("ALTER TABLE projects ADD COLUMN hack_opts TEXT NOT NULL DEFAULT '{}'");
   return db;
 }
 
@@ -85,6 +86,7 @@ export const parseProject = (row) => row && ({
   timeline: safeJson(row.timeline, {}),
   file_opts: safeJson(row.file_opts, {}),
   keyboard_opts: safeJson(row.keyboard_opts, {}),
+  hack_opts: safeJson(row.hack_opts, {}),
 });
 
 function safeJson(s, fallback) {

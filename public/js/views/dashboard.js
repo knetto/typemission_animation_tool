@@ -15,7 +15,7 @@ function newProjectDialog() {
   return new Promise((resolve) => {
     let type = 'audio', fileVariant = 'images', busy = false;
     const name = h('input', { class: 'input', id: 'new-project-name', placeholder: 'Bijv. Missie 3 – briefing', maxlength: 120, required: true });
-    const choices = h('div', { class: 'project-type-choices', role: 'group', 'aria-label': 'Projecttype' });
+    const choices = h('div', { class: 'project-type-choices project-type-choices-main', role: 'group', 'aria-label': 'Projecttype' });
     const variantSection = h('div', { class: 'file-variant-picker', hidden: true });
     const variantBtns = [
       ['images', 'Afbeeldingen', 'Inlog → File Explorer → Open afbeeldingen.', 'folder'],
@@ -43,6 +43,7 @@ function newProjectDialog() {
       ['audio', 'Audio Terminal', 'Neem je stem op, bewerk audio en kies een videoscène.', 'wave'],
       ['file', 'File Terminal', 'Inlog + File Explorer met Afbeeldingen, Inlog Log of E-mail.', 'folder'],
       ['keyboard', 'Toetsenbord Stickers', 'Kies QWERTY, AZERTY of QWERTZ en exporteer een sticker-animatie per toets.', 'keyboard'],
+      ['hack', 'Gehackt Scherm', 'Greenscreen, zwart of afbeelding → glitch → YOU ARE HACKED! met vliegende code.', 'alert'],
     ].map(([key, label, desc, ico]) => h('button', {
       type: 'button', class: `project-type-choice${key === type ? ' on' : ''}`, 'aria-pressed': String(key === type), 'data-type': key,
       onclick: () => {
@@ -112,7 +113,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
     if (current !== 'projects') return;
     const grid = h('div', { class: 'grid' });
     grid.append(h('div', { class: 'card card-new glass', id: 'card-new', onclick: newProject, style: { '--i': 0 } },
-      h('div', {}, h('div', { class: 'plus' }, icon('plus')), h('div', { style: { marginTop: '12px', fontWeight: 600 } }, 'Nieuw project'), h('div', { class: 'hint' }, 'Audio Terminal, File Terminal of Toetsenbord'))));
+      h('div', {}, h('div', { class: 'plus' }, icon('plus')), h('div', { style: { marginTop: '12px', fontWeight: 600 } }, 'Nieuw project'), h('div', { class: 'hint' }, 'Audio, File Terminal, Toetsenbord of Gehackt Scherm'))));
     list.forEach((p, i) => grid.append(projectCard(p, i + 1)));
     body.replaceChildren(grid);
     if (!list.length) body.append(h('p', { class: 'empty' }, 'Nog geen projecten — maak je eerste transmissie! 🕵️'));
@@ -135,6 +136,11 @@ export async function mount(root, { tab = 'projects' } = {}) {
       thumb.replaceChildren(icon('keyboard'), h('div', { class: 'kb-thumb-dots' }, ...sw), h('span', { class: 'file-project-label' }, '⌨ KEYBOARD STICKERS'));
       thumb.classList.add('keyboard-project-thumb');
     }
+    if (p.type === 'hack') {
+      thumb.replaceChildren(icon('alert'), h('span', { class: 'file-project-label' }, '⚠ YOU ARE HACKED'));
+      thumb.classList.add('hack-project-thumb');
+    }
+    const hackBg = { green: 'Greenscreen', blue: 'Bluescreen', black: 'Zwart', image: 'Afbeelding' }[p.hack_opts?.bgMode || 'green'] || 'Greenscreen';
     const kbLayout = (p.keyboard_opts?.layout || 'qwerty').toUpperCase();
     const kbCount = Array.isArray(p.keyboard_opts?.selectedKeys) ? p.keyboard_opts.selectedKeys.length : 26;
     const fileSub = fileVariant === 'login_log'
@@ -150,8 +156,8 @@ export async function mount(root, { tab = 'projects' } = {}) {
       thumb,
       h('h3', {}, p.name),
       h('div', { class: 'card-meta' },
-        h('span', {}, p.type === 'keyboard' ? 'Toetsenbord Stickers' : p.type === 'file' ? 'File Terminal' : 'Audio Terminal'),
-        h('span', {}, p.type === 'keyboard' ? `${kbLayout} · ${kbCount} toetsen` : p.type === 'file' ? fileSub : `${p.asset_count} audio`),
+        h('span', {}, p.type === 'hack' ? 'Gehackt Scherm' : p.type === 'keyboard' ? 'Toetsenbord Stickers' : p.type === 'file' ? 'File Terminal' : 'Audio Terminal'),
+        h('span', {}, p.type === 'hack' ? `Start: ${hackBg}` : p.type === 'keyboard' ? `${kbLayout} · ${kbCount} toetsen` : p.type === 'file' ? fileSub : `${p.asset_count} audio`),
         p.export_count ? h('span', {}, `🎞 ${p.export_count}`) : null,
         p.duration ? h('span', {}, fmtTime(p.duration)) : null),
       h('div', { class: 'card-meta', style: { marginTop: '6px', fontSize: '12px' } }, h('span', {}, 'Bewerkt ' + fmtDate(p.updated_at))));
@@ -168,7 +174,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
   async function duplicate(p) {
     const full = await api.project(p.id);
     const copy = await api.createProject({ name: `${p.name} (kopie)`, scene: p.scene, type: p.type });
-    await api.updateProject(copy.id, { scene_opts: full.scene_opts, file_opts: full.file_opts, keyboard_opts: full.keyboard_opts });
+    await api.updateProject(copy.id, { scene_opts: full.scene_opts, file_opts: full.file_opts, keyboard_opts: full.keyboard_opts, hack_opts: full.hack_opts });
     toast('Instellingen gedupliceerd (zonder bestanden)', 'ok'); renderProjects();
   }
 

@@ -50,7 +50,7 @@ export function defaultLogItem(index = 1) {
 
 const SCRAMBLE_GLYPHS = '▓▒░█#@$%&*?!§¤¥±∆0123456789XKVZQWJPMLR';
 
-export function scrambleText(input = '', tick = 0, seed = 17) {
+export function scrambleText(input = '', tick = 0, seed = 17, animate = true) {
   const s = String(input ?? '');
   let out = '';
   for (let i = 0; i < s.length; i++) {
@@ -61,7 +61,7 @@ export function scrambleText(input = '', tick = 0, seed = 17) {
     }
     const hBase = (Math.imul(i + 1, 2654435761) ^ Math.imul(s.charCodeAt(i), 2246822519) ^ Math.imul(seed + 1, 374761393)) >>> 0;
     // Roughly 25% of characters actively cycle each tick to create a live encrypted/scrambled look
-    const changes = (hBase % 4) === 0;
+    const changes = animate && (hBase % 4) === 0;
     const h = changes ? ((hBase ^ Math.imul(tick + 1, 668265263)) >>> 0) : hBase;
     out += SCRAMBLE_GLYPHS[h % SCRAMBLE_GLYPHS.length];
   }
@@ -76,6 +76,7 @@ export function defaultEmailItem(index = 1) {
     folder: 'Inbox',
     duration: 6,
     scrambled: true,
+    scrambleStatic: false,
     from: 'unknown@transmission.local',
     to: 'agent@transmission.local',
     date: '20 OKT 2026 · 03:11',
@@ -148,6 +149,7 @@ function normalizeEmailItem(item = {}, index = 0) {
     folder: String(item.folder || def.folder).trim().slice(0, 60) || def.folder,
     duration: Number.isFinite(+item.duration) ? Math.max(0.5, Math.min(60, +item.duration)) : def.duration,
     scrambled: item.scrambled !== false,
+    scrambleStatic: item.scrambleStatic === true,
     from: String(item.from ?? def.from).slice(0, 120),
     to: String(item.to ?? def.to).slice(0, 120),
     date: String(item.date ?? def.date).slice(0, 80),
@@ -177,6 +179,7 @@ export function normalizeFileOpts(opts = {}) {
     pace: Number.isFinite(opts.pace) ? Math.max(0.7, Math.min(1.5, opts.pace)) : 1,
     intro: opts.intro !== false,
     outro: opts.outro === true,
+    folderLocked: opts.folderLocked === true,
     stopOnOpen: opts.stopOnOpen === true,
     // Open the last file, keep it on screen for N seconds, then end without closing it.
     endWhileOpen: opts.endWhileOpen === true && opts.stopOnOpen !== true,
@@ -208,11 +211,19 @@ export function fileSchedule(images, options = {}) {
   const segments = items.map((image, index) => {
     const folder = image.folder || defaultFolder, folderChanged = previous !== folder;
     const pace = opts.pace;
+    const locked = Boolean(opts.folderLocked && index === 0);
+    const lockArrive = locked ? cursor + 0.9 * pace : cursor;
+    const lockClick = locked ? cursor + 1.25 * pace : cursor;
+    const lockDoubleClick = locked ? lockClick + 0.15 * pace : cursor;
+    const lockDenied = locked ? lockDoubleClick + 0.12 * pace : cursor;
+    const lockHold = locked ? 1.8 : 0;
+    const cut = locked ? lockDenied + lockHold : cursor;
+    const navStart = locked ? cut : cursor;
     const noOpen = Boolean(opts.stopOnOpen || image.stopOnOpen);
     const keepOpen = !noOpen && opts.endWhileOpen && index === items.length - 1;
-    const folderArrive = cursor + 0.9 * pace, folderClick = cursor + 1.25 * pace, folderOpen = cursor + 1.45 * pace;
-    const fileMove = folderChanged ? folderOpen + 0.18 * pace : cursor + 0.1 * pace;
-    const fileArrive = cursor + (folderChanged ? 2.35 : 1.05) * pace;
+    const folderArrive = navStart + 0.9 * pace, folderClick = navStart + 1.25 * pace, folderOpen = navStart + 1.45 * pace;
+    const fileMove = folderChanged ? folderOpen + 0.18 * pace : navStart + 0.1 * pace;
+    const fileArrive = navStart + (folderChanged ? 2.35 : 1.05) * pace;
     const fileClick = fileArrive + 0.35 * pace, fileDoubleClick = fileClick + 0.15 * pace;
     const open = fileDoubleClick + 0.16 * pace;
     const hold = noOpen ? 0 : keepOpen ? opts.endWhileOpenSeconds : (Number.isFinite(image.duration) ? Math.max(0.5, Math.min(60, image.duration)) : 3);
@@ -221,10 +232,18 @@ export function fileSchedule(images, options = {}) {
     const closeClick = noOpen || keepOpen ? close : close + 0.98 * pace;
     const end = noOpen ? open + 0.12 * pace : keepOpen ? close : close + 1.25 * pace;
     const motionSeed = (opts.motionSeed ^ Math.imul(index + 1, 2654435761) ^ Math.imul(Number(image.id) || 0, 2246822519)) >>> 0;
-    const segment = { image, item: image, folder, folderChanged, noOpen, keepOpen, motionSeed, start: cursor, folderArrive, folderClick, folderOpen, fileMove, fileArrive, fileClick, fileDoubleClick, open, close, closeArrive, closeClick, end, hold, pace };
+    const segment = {
+      image, item: image, folder, folderChanged,
+      locked, lockArrive, lockClick, lockDoubleClick, lockDenied, lockHold, cut,
+      noOpen, keepOpen, motionSeed,
+      start: cursor, navStart, folderArrive, folderClick, folderOpen,
+      fileMove, fileArrive, fileClick, fileDoubleClick,
+      open, close, closeArrive, closeClick, end, hold, pace,
+    };
     cursor = segment.end; previous = folder;
     return segment;
   });
+  const cut = segments[0]?.locked ? segments[0].cut : 0;
   const terminal = cursor + 1.4 * opts.pace;
   const outro = opts.outro && !opts.stopOnOpen && !opts.endWhileOpen && items.length ? {
     start: cursor, arrive: cursor + 0.85 * opts.pace, click: cursor + 1.2 * opts.pace,
@@ -232,7 +251,7 @@ export function fileSchedule(images, options = {}) {
     clear: terminal + 2.6, blank: terminal + 3.5, end: terminal + 4.8,
     motionSeed: opts.motionSeed, pace: opts.pace,
   } : null;
-  return { intro, segments, outro, total: outro ? outro.end : cursor + (items.length && !opts.stopOnOpen && !opts.endWhileOpen ? 0.8 : 0) };
+  return { intro, cut, segments, outro, total: outro ? outro.end : cursor + (items.length && !opts.stopOnOpen && !opts.endWhileOpen ? 0.8 : 0) };
 }
 
 export const displayFileFolder = (name) => name === 'Bestanden' ? 'Files' : name;
@@ -242,6 +261,9 @@ export function sequenceAt(schedule, time) {
   if (schedule.outro && time >= schedule.outro.start) return { phase: time >= schedule.outro.blank ? 'blank' : 'outro', segment: null, elapsed: time - schedule.outro.start };
   const segment = schedule.segments.find((s) => time < s.end) || schedule.segments.at(-1);
   if (!segment) return { phase: 'empty', segment: null, elapsed: 0 };
+  if (segment.locked && time < segment.cut) {
+    return { phase: time < segment.lockDenied ? 'lock_navigate' : 'locked', segment, elapsed: time - segment.start };
+  }
   if (segment.noOpen) return { phase: 'navigate', segment, elapsed: time - segment.start };
   if (segment.keepOpen) return { phase: time < segment.open ? 'navigate' : 'image', segment, elapsed: time - segment.start };
   return { phase: time < segment.open ? 'navigate' : time < segment.close ? 'image' : 'close', segment, elapsed: time - segment.start };
@@ -256,6 +278,9 @@ export function fileSoundEvents(schedule, opts) {
     events.push({ at: 3.05, kind: 'folder' });
   }
   schedule.segments.forEach((s) => {
+    if (s.locked) {
+      events.push({ at: s.lockClick, kind: 'click' }, { at: s.lockDoubleClick, kind: 'click' }, { at: s.lockDenied, kind: 'denied' });
+    }
     if (s.folderChanged) events.push({ at: s.folderClick, kind: 'click' }, { at: s.folderOpen, kind: 'folder' });
     events.push({ at: s.fileClick, kind: 'click' }, { at: s.fileDoubleClick, kind: 'click' }, { at: s.open, kind: 'open' });
     if (s.noOpen) return;
@@ -286,6 +311,19 @@ export function fileSoundtrack(schedule, options = {}, sampleRate = 48000) {
   let seed = 921;
   const noise = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 2147483648 - 1; };
   for (const event of fileSoundEvents(schedule, opts)) {
+    if (event.kind === 'denied') {
+      const seconds = 0.28, length = Math.ceil(seconds * sampleRate);
+      const offset = Math.round(event.at * sampleRate);
+      for (let i = 0; i < length && offset + i < pcm.length; i++) {
+        const t = i / sampleRate;
+        const freq = t < 0.13 ? 235 : 175;
+        const localT = t < 0.13 ? t : t - 0.13;
+        const env = Math.sin(Math.min(1, localT / 0.006) * Math.PI / 2) * Math.exp(-localT * 14);
+        const buzz = Math.sin(t * Math.PI * 2 * freq) * 0.26 + Math.sin(t * Math.PI * 2 * freq * 2) * 0.12;
+        pcm[offset + i] += buzz * env * opts.volume * 0.65;
+      }
+      continue;
+    }
     const mechanical = event.kind === 'click' || event.kind === 'key';
     const seconds = mechanical ? 0.075 : 0.14, length = Math.ceil(seconds * sampleRate);
     const offset = Math.round(event.at * sampleRate);

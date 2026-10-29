@@ -36,9 +36,23 @@ export function filePointer(s, time, { folder, file, first = false }) {
   const close = { x: 1706, y: 180 }, parked = { x: 1768, y: 933 };
   const origin = first ? { x: 1270, y: 770 } : close;
   const move = (from, to, progress, leg) => variedMove(from, to, progress, s.motionSeed ?? 41763, leg);
+  if (s.locked && time < s.cut) {
+    let position;
+    if (time < s.lockDenied) {
+      position = move(origin, folder, (time - s.start) / (s.lockArrive - s.start), 5);
+    } else {
+      const retreat = Math.min(0.65 * s.pace, (s.cut - s.lockDenied) * 0.5);
+      const lockRest = { x: folder.x + 56, y: folder.y + 48 };
+      position = move(folder, lockRest, (time - s.lockDenied) / retreat, 6);
+    }
+    const hover = time >= s.lockArrive - 0.12 * s.pace && time < s.lockDenied ? 'folder' : null;
+    const clicks = [s.lockClick, s.lockDoubleClick];
+    return { ...position, hover, pressed: clicks.some((at) => time >= at && time < at + 0.075) };
+  }
+  const navStart = s.locked ? s.cut : s.start;
   let position;
   if (time < s.open) {
-    if (s.folderChanged && time < s.folderOpen) position = move(origin, folder, (time - s.start) / (s.folderArrive - s.start), 0);
+    if (s.folderChanged && time < s.folderOpen) position = move(origin, folder, (time - navStart) / (s.folderArrive - navStart), 0);
     else position = move(s.folderChanged ? folder : origin, file, (time - s.fileMove) / (s.fileArrive - s.fileMove), 1);
   } else if (s.noOpen) {
     position = file;

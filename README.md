@@ -116,3 +116,5 @@ Voor een Audio Terminal video kies je een scène:
 - Afbeeldingen: `storage/images/`
 - Sound effects: `storage/sfx/`
 - Exports: `storage/exports/`
+
+Bij het Gehackt Scherm gebruikt een transparante export standaard **WebM** (VP9 met alpha en Opus-geluid) voor kleine bestanden. **MOV / ProRes 4444** blijft beschikbaar voor montageprogramma's die dit nodig hebben, maar maakt veel grotere bestanden. Ondersteunt je montageprogramma geen WebM met transparantie, kies dan MOV of exporteer MP4 met een groene achtergrond om te keyen. Bestaande exports veranderen niet; maak een nieuwe export om het compacte formaat te gebruiken.

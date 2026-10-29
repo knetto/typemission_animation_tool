@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb, parseProject } from './db.js';
-import { muxVideoAudio, runFfmpeg } from './ffmpeg.js';
+import { muxVideoAudio, runFfmpeg, pngSequenceToProRes, pngSequenceToWebm } from './ffmpeg.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -59,20 +59,21 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
   // ---------- projects ----------
   app.get('/api/projects', (_req, res) => {
     const rows = db.prepare(`
-      SELECT p.id, p.name, p.type, p.scene, p.duration, p.keyboard_opts, p.created_at, p.updated_at,
+      SELECT p.id, p.name, p.type, p.scene, p.duration, p.keyboard_opts, p.hack_opts, p.created_at, p.updated_at,
         (SELECT COUNT(*) FROM assets a WHERE a.project_id = p.id) AS asset_count,
         (SELECT COUNT(*) FROM project_images i WHERE i.project_id = p.id) AS image_count,
         (SELECT COUNT(*) FROM exports e WHERE e.project_id = p.id) AS export_count
       FROM projects p ORDER BY p.updated_at DESC`).all();
-    res.json(rows.map((r) => ({ ...r, keyboard_opts: parseProject(r).keyboard_opts })));
+    res.json(rows.map((r) => { const parsed = parseProject(r); return { ...r, keyboard_opts: parsed.keyboard_opts, hack_opts: parsed.hack_opts }; }));
   });
 
   app.post('/api/projects', (req, res) => {
     const name = String(req.body?.name || 'Nieuw project').slice(0, 120);
     const scene = ['transmission', 'urgent', 'ai'].includes(req.body?.scene) ? req.body.scene : 'transmission';
-    const type = ['audio', 'file', 'keyboard'].includes(req.body?.type) ? req.body.type : 'audio';
+    const type = ['audio', 'file', 'keyboard', 'hack'].includes(req.body?.type) ? req.body.type : 'audio';
     const fileOpts = req.body?.file_opts && typeof req.body.file_opts === 'object' ? JSON.stringify(req.body.file_opts) : '{}';
-    const info = db.prepare('INSERT INTO projects (name, scene, type, file_opts) VALUES (?, ?, ?, ?)').run(name, scene, type, fileOpts);
+    const hackOpts = req.body?.hack_opts && typeof req.body.hack_opts === 'object' ? JSON.stringify(req.body.hack_opts) : '{}';
+    const info = db.prepare('INSERT INTO projects (name, scene, type, file_opts, hack_opts) VALUES (?, ?, ?, ?, ?)').run(name, scene, type, fileOpts, hackOpts);
     res.status(201).json(parseProject(db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid)));
   });
 
@@ -89,13 +90,14 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     const p = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!p) return res.status(404).json({ error: 'Project niet gevonden' });
     const b = req.body || {};
-    db.prepare(`UPDATE projects SET name = ?, scene = ?, scene_opts = ?, timeline = ?, file_opts = ?, keyboard_opts = ?, duration = ?, updated_at = ? WHERE id = ?`).run(
+    db.prepare(`UPDATE projects SET name = ?, scene = ?, scene_opts = ?, timeline = ?, file_opts = ?, keyboard_opts = ?, hack_opts = ?, duration = ?, updated_at = ? WHERE id = ?`).run(
       b.name !== undefined ? String(b.name).slice(0, 120) : p.name,
       ['transmission', 'urgent', 'ai'].includes(b.scene) ? b.scene : p.scene,
       b.scene_opts !== undefined ? JSON.stringify(b.scene_opts) : p.scene_opts,
       b.timeline !== undefined ? JSON.stringify(b.timeline) : p.timeline,
       b.file_opts !== undefined ? JSON.stringify(b.file_opts) : p.file_opts,
       b.keyboard_opts !== undefined ? JSON.stringify(b.keyboard_opts) : p.keyboard_opts,
+      b.hack_opts !== undefined ? JSON.stringify(b.hack_opts) : p.hack_opts,
       Number.isFinite(b.duration) ? b.duration : p.duration,
       now(), p.id,
     );
@@ -150,7 +152,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
   // ---------- File Terminal & Keyboard background images ----------
   app.post('/api/projects/:id/images', (req, res, next) => {
     const p = db.prepare('SELECT type FROM projects WHERE id = ?').get(req.params.id);
-    if (!p || !['file', 'keyboard'].includes(p.type)) return res.status(400).json({ error: 'Project not found' });
+    if (!p || !['file', 'keyboard', 'hack'].includes(p.type)) return res.status(400).json({ error: 'Project not found' });
     next();
   }, uploadImages.array('files', 50), (req, res) => {
     const folder = String(req.body?.folder || 'Files').trim().slice(0, 60) || 'Files';
@@ -529,10 +531,11 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     const audioOnlyExport = req.body?.scene === 'audio';
     if (!project || (audioOnlyExport ? !audio || video : !video)) { await cleanup(); return res.status(400).json({ error: 'Exportbestanden ontbreken of project bestaat niet' }); }
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'transmissie';
-    const scene = audioOnlyExport ? 'audio' : ['transmission', 'urgent', 'ai', 'file', 'keyboard'].includes(req.body.scene) ? req.body.scene : project.scene;
+    const scene = audioOnlyExport ? 'audio' : ['transmission', 'urgent', 'ai', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
     const format = audioOnlyExport ? (req.body.format === 'mp3' ? 'mp3' : 'wav') : 'mp4';
     const keySlug = req.body.keyLabel ? '-toets-' + String(req.body.keyLabel).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) : '';
-    const filename = `${slug}-${scene}${keySlug}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${format}`;
+    const partSlug = req.body.partLabel ? '-' + String(req.body.partLabel).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) : '';
+    const filename = `${slug}-${scene}${keySlug}${partSlug}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${format}`;
     const outPath = path.join(dirs.exports, filename);
     let cancelled = false;
     res.on('close', () => { if (!res.writableEnded) cancelled = true; });
@@ -554,6 +557,81 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     } finally {
       await cleanup();
     }
+  });
+
+  // ---------- transparent MOV exports (browser PNG frames with alpha → ffmpeg → ProRes 4444) ----------
+  const movSessions = new Map();   // token -> { dir, projectId, created }
+  const dropMovSession = async (token) => {
+    const s = movSessions.get(token);
+    movSessions.delete(token);
+    if (s) await fs.promises.rm(s.dir, { recursive: true, force: true }).catch(() => {});
+  };
+  const movSession = (req, res, next) => {
+    const s = /^[a-f0-9]{24}$/.test(req.params.token) ? movSessions.get(req.params.token) : null;
+    if (!s) return res.status(404).json({ error: 'Export-sessie niet gevonden (verlopen?)' });
+    req.movSession = s; next();
+  };
+  const uploadFrames = multer({
+    storage: multer.diskStorage({
+      destination: (req, _file, cb) => cb(null, req.movSession.dir),
+      filename: (_req, file, cb) => cb(null, file.originalname),
+    }),
+    fileFilter: (_req, file, cb) => cb(null, /^\d{6}\.png$/.test(file.originalname)),
+    limits: { fileSize: 200 * 1024 * 1024, files: 400 },
+  });
+
+  app.post('/api/projects/:id/exports/mov', async (req, res) => {
+    const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project niet gevonden' });
+    // clean up sessions abandoned for more than 3 hours
+    for (const [t, s] of movSessions) if (Date.now() - s.created > 3 * 3600e3) dropMovSession(t);
+    const token = crypto.randomBytes(12).toString('hex');
+    const dir = path.join(dirs.tmp, `mov-${token}`);
+    await fs.promises.mkdir(dir, { recursive: true });
+    movSessions.set(token, { dir, projectId: project.id, created: Date.now() });
+    res.status(201).json({ token });
+  });
+
+  app.post('/api/exports/mov/:token/frames', movSession, uploadFrames.array('frames'), (req, res) => {
+    res.json({ received: req.files?.length || 0 });
+  });
+
+  app.post('/api/exports/mov/:token/finish', movSession, uploadTmp.single('audio'), async (req, res) => {
+    const s = req.movSession, audio = req.file;
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(s.projectId);
+    const frameCount = (await fs.promises.readdir(s.dir)).filter((f) => /^\d{6}\.png$/.test(f)).length;
+    if (!project || !frameCount) {
+      if (audio) await safeUnlink(audio.path);
+      await dropMovSession(req.params.token);
+      return res.status(400).json({ error: 'Geen frames ontvangen of project bestaat niet' });
+    }
+    const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'transmissie';
+    const scene = ['transmission', 'urgent', 'ai', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
+    const fps = [24, 25, 30, 50, 60].includes(Number(req.body.fps)) ? Number(req.body.fps) : 30;
+    const format = req.body.format === 'webm' ? 'webm' : 'mov';
+    const filename = `${slug}-${scene}-transparant-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${format}`;
+    const outPath = path.join(dirs.exports, filename);
+    try {
+      const encode = format === 'webm' ? pngSequenceToWebm : pngSequenceToProRes;
+      await encode(path.join(s.dir, '%06d.png'), fps, audio?.path, outPath);
+      const size = (await fs.promises.stat(outPath)).size;
+      const info = db.prepare('INSERT INTO exports (project_id, filename, scene, width, height, fps, duration, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(project.id, filename, scene, Number(req.body.width) || 1920, Number(req.body.height) || 1080, fps, Number(req.body.duration) || 0, size);
+      touch(project.id);
+      res.status(201).json(db.prepare('SELECT * FROM exports WHERE id = ?').get(info.lastInsertRowid));
+    } catch (e) {
+      console.error('mov export failed', e);
+      await safeUnlink(outPath);
+      res.status(500).json({ error: `${format.toUpperCase()}-export mislukt: ` + e.message });
+    } finally {
+      if (audio) await safeUnlink(audio.path);
+      await dropMovSession(req.params.token);
+    }
+  });
+
+  app.delete('/api/exports/mov/:token', async (req, res) => {
+    await dropMovSession(req.params.token);
+    res.status(204).end();
   });
 
   app.delete('/api/exports/:id', async (req, res) => {

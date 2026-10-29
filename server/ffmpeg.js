@@ -22,3 +22,28 @@ export function muxVideoAudio(videoPath, audioPath, outPath) {
     outPath,
   ]);
 }
+
+// PNG sequence (with alpha) + soundtrack → ProRes 4444 .mov that keeps transparency in every NLE.
+export function pngSequenceToProRes(framePattern, fps, audioPath, outPath) {
+  return runFfmpeg([
+    '-framerate', String(fps), '-i', framePattern,
+    ...(audioPath ? ['-i', audioPath] : []),
+    '-map', '0:v:0', ...(audioPath ? ['-map', '1:a:0', '-c:a', 'pcm_s16le', '-ar', '48000', '-shortest'] : []),
+    '-c:v', 'prores_ks', '-profile:v', '4444', '-pix_fmt', 'yuva444p10le', '-alpha_bits', '16', '-vendor', 'apl0',
+    '-r', String(fps),
+    outPath,
+  ]);
+}
+
+// Compact transparent video: inter-frame VP9 compression with an alpha channel.
+export function pngSequenceToWebm(framePattern, fps, audioPath, outPath) {
+  return runFfmpeg([
+    '-framerate', String(fps), '-i', framePattern,
+    ...(audioPath ? ['-i', audioPath] : []),
+    '-map', '0:v:0', ...(audioPath ? ['-map', '1:a:0', '-c:a', 'libopus', '-b:a', '96k', '-ar', '48000', '-shortest'] : []),
+    '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-crf', '32', '-b:v', '0',
+    '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1', '-lag-in-frames', '0',
+    '-r', String(fps),
+    outPath,
+  ]);
+}

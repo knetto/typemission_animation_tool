@@ -45,7 +45,7 @@ export async function renderExport({ projectId, mode, opts, voice, width = 1920,
 }
 
 // Shared encoder for Audio Terminal scenes, File Terminal sequence, and Keyboard Sticker animations.
-export async function renderCanvasExport({ projectId, canvas, scene, soundtrack, duration, mode = 'file', keyLabel = '', width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
+export async function renderCanvasExport({ projectId, canvas, scene, soundtrack, duration, startTime = 0, mode = 'file', keyLabel = '', partLabel = '', width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
   if (!exportSupported()) throw new Error('Video export requires Chrome or Edge.');
   canvas.width = width; canvas.height = height;
   const frames = Math.ceil(duration * fps);
@@ -63,7 +63,7 @@ export async function renderCanvasExport({ projectId, canvas, scene, soundtrack,
     for (let i = 0; i < frames; i++) {
       if (signal?.aborted) throw new DOMException('Geannuleerd', 'AbortError');
       if (encErr) throw encErr;
-      scene.draw(i / fps);
+      scene.draw(startTime + i / fps);
       const frame = new VideoFrame(canvas, { timestamp: Math.round((i * 1e6) / fps), duration: Math.round(1e6 / fps) });
       encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
       frame.close();
@@ -91,6 +91,7 @@ export async function renderCanvasExport({ projectId, canvas, scene, soundtrack,
   fd.append('audio', encodeWav(soundtrack, SR), 'audio.wav');
   fd.append('scene', mode); fd.append('width', width); fd.append('height', height); fd.append('fps', fps); fd.append('duration', duration.toFixed(2));
   if (keyLabel) fd.append('keyLabel', keyLabel);
+  if (partLabel) fd.append('partLabel', partLabel);
   const response = await fetch(`/api/projects/${projectId}/exports`, { method: 'POST', body: fd, signal });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Video export failed');
@@ -98,13 +99,68 @@ export async function renderCanvasExport({ projectId, canvas, scene, soundtrack,
   return result;
 }
 
-export async function renderAudioExport({ projectId, pcm, format = 'wav', onProgress = () => {}, signal }) {
+// Transparent export: canvas frames → PNG → server → WebM VP9/Opus or MOV ProRes/PCM.
+// H.264/WebCodecs has no alpha channel, so every frame is uploaded losslessly as PNG in batches.
+export async function renderCanvasExportMov({ projectId, canvas, scene, soundtrack, duration, mode = 'hack', format = 'mov', width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
+  canvas.width = width; canvas.height = height;
+  const frames = Math.ceil(duration * fps);
+  const abortErr = () => new DOMException('Geannuleerd', 'AbortError');
+  const json = async (r, fallback) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error || fallback); return b; };
+
+  onProgress(0, `Preparing transparent ${format.toUpperCase()}…`);
+  const { token } = await json(await fetch(`/api/projects/${projectId}/exports/mov`, { method: 'POST', signal }), 'Could not start transparent export');
+  const toPng = () => new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('PNG encoding failed'))), 'image/png'));
+  const upload = (batch) => {
+    const fd = new FormData();
+    for (const [i, blob] of batch) fd.append('frames', blob, `${String(i).padStart(6, '0')}.png`);
+    return fetch(`/api/exports/mov/${token}/frames`, { method: 'POST', body: fd, signal }).then((r) => json(r, 'Frame upload failed'));
+  };
+
+  let ok = false;
+  try {
+    scene.reset();
+    const t0 = performance.now();
+    let batch = [], bytes = 0, inFlight = Promise.resolve();
+    for (let i = 0; i < frames; i++) {
+      if (signal?.aborted) throw abortErr();
+      scene.draw(i / fps);
+      const blob = await toPng();
+      batch.push([i, blob]); bytes += blob.size;
+      if (batch.length >= 40 || bytes > 48 * 1024 * 1024 || i === frames - 1) {
+        await inFlight;                      // keep at most one batch uploading while we render the next
+        inFlight = upload(batch);
+        inFlight.catch(() => {});            // error is re-thrown at the next await
+        batch = []; bytes = 0;
+      }
+      if (i % 3 === 0) {
+        const el = (performance.now() - t0) / 1000, eta = (el / (i + 1)) * (frames - i - 1);
+        onProgress((i / frames) * 0.85, `Frame ${i + 1} / ${frames} · ~${Math.ceil(eta)}s remaining`);
+      }
+    }
+    await inFlight;
+
+    onProgress(0.88, format === 'webm' ? 'Building compact WebM (alpha)…' : 'Building ProRes 4444 MOV (alpha)…');
+    const fd = new FormData();
+    fd.append('format', format);
+    fd.append('audio', encodeWav(soundtrack, SR), 'audio.wav');
+    fd.append('scene', mode); fd.append('width', width); fd.append('height', height); fd.append('fps', fps); fd.append('duration', duration.toFixed(2));
+    const result = await json(await fetch(`/api/exports/mov/${token}/finish`, { method: 'POST', body: fd, signal }), 'Transparent export failed');
+    ok = true;
+    onProgress(1, 'Done!');
+    return result;
+  } finally {
+    if (!ok) fetch(`/api/exports/mov/${token}`, { method: 'DELETE' }).catch(() => {});
+  }
+}
+
+export async function renderAudioExport({ projectId, pcm, format = 'wav', partLabel = '', onProgress = () => {}, signal }) {
   if (!pcm.length) throw new Error('Add audio to the timeline first.');
   if (signal?.aborted) throw new DOMException('Geannuleerd', 'AbortError');
   onProgress(0.1, 'Preparing audio…');
   const fd = new FormData();
   fd.append('audio', encodeWav(pcm, SR), 'audio.wav');
   fd.append('scene', 'audio'); fd.append('format', format); fd.append('duration', (pcm.length / SR).toFixed(3));
+  if (partLabel) fd.append('partLabel', partLabel);
   onProgress(0.5, 'Saving audio…');
   const response = await fetch(`/api/projects/${projectId}/exports`, { method: 'POST', body: fd, signal });
   const result = await response.json();
