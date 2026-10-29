@@ -22,6 +22,15 @@ Kies bij een nieuw project **Audio Terminal** of **File Terminal**. Bewerk je st
 
 ## ✨ Functies
 
+### Airline Website & Ticket (afbeeldingen)
+Kies bij **Nieuw project** voor **Airline Website & Ticket**. Maak een fictieve airline-homepage met zichtbare taalvlaggen en een zelfgetekende Berlijn-illustratie, of een bijpassende boardingpass. De Dom, Fernsehturm, Brandenburger Tor en Spree worden scherp op elke exportresolutie getekend, met één doorlopend kleurverloop van donkerblauw naar lichtblauw. De skyline blijft zichtbaar boven het zoekformulier. De standaardnaam is **Airline**. De homepage toont drie aanpasbare vluchtkeuzes die dezelfde route gebruiken als het zoekformulier. Vlucht 1 levert de gegevens voor de boardingpass.
+
+Kies **EN, NL, FR, DE of ES** via de taalkeuze of klik op een vlag in het voorbeeld. De homepage en boardingpass worden vertaald en het vertrekpunt wordt Londen, Amsterdam, Parijs, Frankfurt of Madrid. Alle teksten blijven aanpasbaar via **Alle teksten aanpassen**; eigen teksten worden per taal onthouden. Je kunt daarna ook een ander vertrekpunt invullen of een vertrekpreset kiezen. Aangepaste vluchtgegevens, namen en eigen datumnotaties blijven behouden bij het wisselen van taal.
+
+Onder **Reiziger & ticket** kies je **Volwassene** of **Kind**. Het zoekformulier toont de passende reiziger en de boardingpass vermeldt het tickettype, automatisch vertaald met de taalvlag. De keuze wordt in het project opgeslagen. Bestaande projecten gebruiken standaard Volwassene; prijzen blijven vrij instelbaar.
+
+Exporteer elk ontwerp als **PNG** of **JPG**, op standaardresolutie of extra scherp (2×). De homepage is 1920 × 1080 of 3840 × 2160 pixels; de boardingpass is 1600 × 800 of 3200 × 1600 pixels. Exports worden gedownload en blijven in het project beschikbaar. De Berlijn-illustratie wordt rechtstreeks op canvas getekend; externe afbeeldingen of lettertypen zijn niet nodig.
+
 ### 1. 📁 Projecten & Bestanden
 - **Projectenbeheer**: Maak nieuwe missies/projecten aan, hernoem, dupliceer of verwijder ze.
 - **Projecttype**: Audio Terminal voor de multitrack audio-editor; File Terminal voor afbeeldingen, mappen en automatische navigatie. Bestaande projecten blijven Audio Terminal projecten.

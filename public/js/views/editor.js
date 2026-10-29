@@ -24,6 +24,7 @@ const FX_BY_ID = Object.fromEntries(VOICE_PRESETS.map((p) => [p.id, p]));
 
 export async function mount(root, { id }) {
   const project = await api.project(id);
+  if (project.type === 'airline') return (await import('./airline.js')).mount(root, { id, project });
   if (project.type === 'file') return (await import('./files.js')).mount(root, { id, project });
   if (project.type === 'keyboard') return (await import('./keyboard.js')).mount(root, { id, project });
   if (project.type === 'hack') return (await import('./hack.js')).mount(root, { id, project });
@@ -150,7 +151,11 @@ export async function mount(root, { id }) {
     return { id: uid(), trackId, src, name, start: Math.max(0, start), offset: 0, duration, ...clipDefaults() };
   }
 
-  async function addSource(src, name, trackId, start) {
+  function createTrackObject() {
+    return { id: 't_' + uid(), name: `Audio ${tl.tracks.length + 1}`, kind: 'extra', gain: 1, mute: false, solo: false };
+  }
+
+  async function addSource(src, name, trackId, start, opts = {}) {
     const done = busy('Audio laden…');
     try {
       if (src?.type === 'freesound' && src.item) {
@@ -164,9 +169,24 @@ export async function mount(root, { id }) {
       }
       await engine.getSource(src);
       const dur = engine.sourceDuration(src);
-      const c = makeClip(src, name, trackId, start, dur);
-      mutate(() => tl.clips.push(c));
-      selected = new Set([c.id]); renderTimeline(); renderInspector();
+      let c;
+      let createdTrack = null;
+      mutate(() => {
+        let targetTrackId = trackId;
+        if (opts.createNewTrack) {
+          createdTrack = createTrackObject();
+          tl.tracks.push(createdTrack);
+          targetTrackId = createdTrack.id;
+        }
+        c = makeClip(src, name, targetTrackId, start, dur);
+        tl.clips.push(c);
+      });
+      if (c) {
+        selected = new Set([c.id]);
+        renderTimeline();
+        renderInspector();
+      }
+      if (createdTrack) toast(`Nieuw spoor "${createdTrack.name}" aangemaakt`, 'ok', 1600);
       if (mediaTab === 'sfx') renderMedia();
       return c;
     } catch (e) { toast('Kon audio niet laden: ' + e.message, 'err'); }
@@ -379,6 +399,92 @@ export async function mount(root, { id }) {
   }
   zoomIn.addEventListener('input', () => setZoom(+zoomIn.value));
 
+  const hasTimelineDropPayload = (e) => {
+    const types = Array.from(e.dataTransfer?.types || []);
+    return types.includes('application/x-tsrc') || types.includes('Files');
+  };
+
+  const clearTimelineDropState = () => {
+    tlWrap.classList.remove('tl-drop-active');
+    emptyHint.classList.remove('drop');
+    lanes.querySelectorAll('.track-lane.drop, .track-lane.active').forEach((n) => n.classList.remove('drop', 'active'));
+    headsInner.querySelectorAll('.track-head.drop, .add-track.drop').forEach((n) => n.classList.remove('drop'));
+    snapLine.style.height = 30 + tl.tracks.length * TRACK_H + 'px';
+    showSnap(null);
+  };
+
+  const handleTimelineDrop = (e, trackId, startTime, { createNewTrack = false } = {}) => {
+    e.preventDefault();
+    e.stopPropagation();
+    clearTimelineDropState();
+    const types = Array.from(e.dataTransfer?.types || []);
+    if (types.includes('application/x-tsrc')) {
+      try {
+        const d = JSON.parse(e.dataTransfer.getData('application/x-tsrc'));
+        addSource(d.src, d.name, trackId, startTime, { createNewTrack });
+      } catch {}
+      return;
+    }
+    if (e.dataTransfer?.files?.length) {
+      uploadFiles(e.dataTransfer.files, { placeOnTimeline: true, trackId, startTime, createNewTrack });
+    }
+  };
+
+  tlWrap.addEventListener('dragover', (e) => {
+    if (!hasTimelineDropPayload(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    tlWrap.classList.add('tl-drop-active');
+    const lanesRect = lanes.getBoundingClientRect();
+    const rawTi = Math.floor((e.clientY - lanesRect.top) / TRACK_H);
+    const onEmptyBox = Boolean(e.target.closest('.tl-empty'));
+    const createNew = rawTi >= tl.tracks.length && !(onEmptyBox && !tl.clips.length);
+    const newTrackLane = lanes.querySelector('.new-track-lane');
+    const addBtn = $('#add-track-btn', headsInner);
+
+    if (createNew) {
+      lanes.querySelectorAll('.track-lane.drop').forEach((n) => { if (n !== newTrackLane) n.classList.remove('drop'); });
+      newTrackLane?.classList.add('drop', 'active');
+      addBtn?.classList.add('drop');
+      emptyHint.classList.remove('drop');
+      snapLine.style.height = 30 + (tl.tracks.length + 1) * TRACK_H + 'px';
+    } else {
+      newTrackLane?.classList.remove('drop', 'active');
+      addBtn?.classList.remove('drop');
+      const ti = clamp(rawTi, 0, tl.tracks.length - 1);
+      const targetLane = lanes.children[ti];
+      lanes.querySelectorAll('.track-lane.drop').forEach((n) => { if (n !== targetLane) n.classList.remove('drop'); });
+      targetLane?.classList.add('drop');
+      if (!tl.clips.length) emptyHint.classList.add('drop');
+      snapLine.style.height = 30 + tl.tracks.length * TRACK_H + 'px';
+    }
+
+    if (e.clientX >= lanesRect.left && !(onEmptyBox && !createNew)) {
+      showSnap(snapTime(xToTime(e.clientX), null));
+    } else {
+      showSnap(null);
+    }
+  });
+  tlWrap.addEventListener('dragleave', (e) => {
+    const r = tlWrap.getBoundingClientRect();
+    if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) {
+      clearTimelineDropState();
+    }
+  });
+  tlWrap.addEventListener('drop', (e) => {
+    if (!hasTimelineDropPayload(e)) return;
+    const lanesRect = lanes.getBoundingClientRect();
+    const rawTi = Math.floor((e.clientY - lanesRect.top) / TRACK_H);
+    const onEmptyBox = Boolean(e.target.closest('.tl-empty'));
+    const createNew = rawTi >= tl.tracks.length && !(onEmptyBox && !tl.clips.length);
+    const ti = clamp(rawTi, 0, tl.tracks.length - 1);
+    const targetTrack = tl.tracks[ti] || trackByKind('voice');
+    const dropTime = (e.clientX >= lanesRect.left && !(onEmptyBox && !createNew))
+      ? snapTime(xToTime(e.clientX), null)
+      : (createNew ? 0 : trackEnd(targetTrack.id));
+    handleTimelineDrop(e, targetTrack.id, dropTime, { createNewTrack: createNew });
+  });
+
   function renderTimeline() {
     const width = Math.max(scroller.clientWidth || 800, (contentEnd() + 20) * tl.zoom);
     tlCanvas.style.width = width + 'px';
@@ -394,15 +500,40 @@ export async function mount(root, { id }) {
         if (e.target.closest('.clip')) return;
         timelineContext(e, t);
       });
-      lane.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('application/x-tsrc')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; lane.classList.add('drop'); } });
-      lane.addEventListener('dragleave', () => lane.classList.remove('drop'));
+      lane.addEventListener('dragover', (e) => {
+        if (!hasTimelineDropPayload(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        tlWrap.classList.add('tl-drop-active');
+        lanes.querySelectorAll('.track-lane.drop, .track-lane.active').forEach((n) => { if (n !== lane) n.classList.remove('drop', 'active'); });
+        $('#add-track-btn', headsInner)?.classList.remove('drop');
+        lane.classList.add('drop');
+        snapLine.style.height = 30 + tl.tracks.length * TRACK_H + 'px';
+        const dropTime = snapTime(xToTime(e.clientX), null);
+        showSnap(dropTime);
+      });
+      lane.addEventListener('dragleave', (e) => {
+        const r = lane.getBoundingClientRect();
+        if (e.clientX <= r.left || e.clientX >= r.right || e.clientY <= r.top || e.clientY >= r.bottom) {
+          lane.classList.remove('drop');
+          showSnap(null);
+        }
+      });
       lane.addEventListener('drop', (e) => {
-        e.preventDefault(); lane.classList.remove('drop');
-        try { const d = JSON.parse(e.dataTransfer.getData('application/x-tsrc')); addSource(d.src, d.name, t.id, snapTime(xToTime(e.clientX), null)); } catch {}
+        const dropTime = snapTime(xToTime(e.clientX), null);
+        handleTimelineDrop(e, t.id, dropTime);
       });
       tl.clips.filter((c) => c.trackId === t.id).forEach((c) => lane.append(clipEl(c, color)));
       lanes.append(lane);
     });
+    const nextColor = PALETTE[tl.tracks.length % PALETTE.length];
+    const newTrackLane = h(
+      'div',
+      { class: 'track-lane new-track-lane', style: { '--tc': nextColor } },
+      h('div', { class: 'new-track-hint' }, icon('plus'), `Sleep hierheen voor nieuw spoor (Audio ${tl.tracks.length + 1})`)
+    );
+    lanes.append(newTrackLane);
     headsInner.append(h('button', { class: 'btn btn-sm btn-ghost add-track', id: 'add-track-btn', onclick: addTrack }, icon('plus'), 'Spoor toevoegen'));
     playheadEl.style.height = 30 + tl.tracks.length * TRACK_H + 'px';
     snapLine.style.height = playheadEl.style.height;
@@ -553,6 +684,7 @@ export async function mount(root, { id }) {
     const trackIdx0 = tl.tracks.findIndex((t) => t.id === c.trackId);
     const srcDur = engine.sourceDuration(c.src) ?? Infinity;
     let moved = false;
+    let willCreateTrack = false;
     el.setPointerCapture(e.pointerId);
     if (mode !== 'move') e.target.classList.add('on');
 
@@ -567,14 +699,37 @@ export async function mount(root, { id }) {
         const s1 = snapTime(o.start + d, null, pts), s2 = snapTime(o.start + o.duration + d, null, pts);
         if (snap) { if (s1 !== o.start + d) d = s1 - o.start; else if (s2 !== o.start + o.duration + d) d = s2 - o.start - o.duration; else showSnap(null); }
         d = Math.max(-minStart, d);
-        const ti = clamp(Math.floor((ev.clientY - laneTop) / TRACK_H), 0, tl.tracks.length - 1), dTrack = ti - trackIdx0;
-        group.forEach((g) => {
-          const og = orig.get(g.id); g.start = og.start + d;
-          const gi = clamp(tl.tracks.findIndex((t) => t.id === og.trackId) + dTrack, 0, tl.tracks.length - 1);
-          g.trackId = tl.tracks[gi].id;
-          const node = lanes.querySelector(`.clip[data-id="${g.id}"]`);
-          if (node) { node.style.left = g.start * tl.zoom + 'px'; const lane = lanes.children[gi]; if (node.parentElement !== lane) lane.append(node); }
-        });
+        const rawTi = Math.floor((ev.clientY - laneTop) / TRACK_H);
+        const newTrackLane = lanes.querySelector('.new-track-lane');
+        const addBtn = $('#add-track-btn', headsInner);
+        if (rawTi >= tl.tracks.length) {
+          willCreateTrack = true;
+          newTrackLane?.classList.add('drop', 'active');
+          addBtn?.classList.add('drop');
+          snapLine.style.height = 30 + (tl.tracks.length + 1) * TRACK_H + 'px';
+          group.forEach((g) => {
+            const og = orig.get(g.id);
+            g.start = og.start + d;
+            const node = lanes.querySelector(`.clip[data-id="${g.id}"]`);
+            if (node && newTrackLane) {
+              node.style.left = g.start * tl.zoom + 'px';
+              if (node.parentElement !== newTrackLane) newTrackLane.append(node);
+            }
+          });
+        } else {
+          willCreateTrack = false;
+          newTrackLane?.classList.remove('drop', 'active');
+          addBtn?.classList.remove('drop');
+          snapLine.style.height = 30 + tl.tracks.length * TRACK_H + 'px';
+          const ti = clamp(rawTi, 0, tl.tracks.length - 1), dTrack = ti - trackIdx0;
+          group.forEach((g) => {
+            const og = orig.get(g.id); g.start = og.start + d;
+            const gi = clamp(tl.tracks.findIndex((t) => t.id === og.trackId) + dTrack, 0, tl.tracks.length - 1);
+            g.trackId = tl.tracks[gi].id;
+            const node = lanes.querySelector(`.clip[data-id="${g.id}"]`);
+            if (node) { node.style.left = g.start * tl.zoom + 'px'; const lane = lanes.children[gi]; if (node.parentElement !== lane) lane.append(node); }
+          });
+        }
       } else if (mode === 'trimL') {
         let ns = snapTime(o.start + dxT, null, pts);
         let d = ns - o.start;                                      // + = shrink
@@ -597,8 +752,18 @@ export async function mount(root, { id }) {
     };
     const onUp = () => {
       el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp);
-      el.classList.remove('dragging'); showSnap(null);
-      if (moved) { pushUndo(before); changed(); }
+      el.classList.remove('dragging');
+      clearTimelineDropState();
+      if (moved) {
+        if (willCreateTrack) {
+          const nt = createTrackObject();
+          tl.tracks.push(nt);
+          group.forEach((g) => { g.trackId = nt.id; });
+          toast(`Nieuw spoor "${nt.name}" aangemaakt`, 'ok', 1600);
+        }
+        pushUndo(before);
+        changed();
+      }
       else if (!(e.shiftKey || e.ctrlKey || e.metaKey) && mode === 'move') { selected = new Set([c.id]); setPlayheadIfOutside(xToTime(x0), c); renderTimeline(); renderInspector(); }
     };
     el.addEventListener('pointermove', onMove); el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp);
@@ -669,26 +834,53 @@ export async function mount(root, { id }) {
   };
   let rec = null;
 
-  async function uploadFiles(files) {
+  async function uploadFiles(files, opts = {}) {
     files = [...files]; if (!files.length) return;
     const done = busy(`${files.length} bestand(en) uploaden…`);
     try {
+      const before = snapshot();
       const rows = await api.uploadAssets(id, files);
       assets.push(...rows); renderMedia();
-      const autoAdd = !tl.clips.length;
-      let t = trackEnd(trackByKind('voice').id);
+      const placeOnTimeline = Boolean(opts.placeOnTimeline || !tl.clips.length);
+      let targetTrackId = opts.trackId || trackByKind('voice').id;
+      let createdTrack = null;
+      if (opts.createNewTrack && placeOnTimeline) {
+        createdTrack = createTrackObject();
+        tl.tracks.push(createdTrack);
+        targetTrackId = createdTrack.id;
+      }
+      let t = Number.isFinite(opts.startTime) ? Math.max(0, opts.startTime) : trackEnd(targetTrackId);
+      const addedClipIds = [];
       for (const a of rows) {
         const src = { type: 'asset', id: a.id };
         try {
           await engine.getSource(src);
           const dur = engine.sourceDuration(src);
           a.duration = dur; api.updateAsset(a.id, { duration: dur }).catch(() => {});
-          if (autoAdd) { const c = makeClip(src, a.name, trackByKind('voice').id, t, dur); t += dur; tl.clips.push(c); selected.add(c.id); }
+          if (placeOnTimeline) {
+            const c = makeClip(src, a.name, targetTrackId, t, dur);
+            t += dur;
+            tl.clips.push(c);
+            addedClipIds.push(c.id);
+          }
         } catch { toast(`"${a.name}" kon niet gedecodeerd worden`, 'err'); }
       }
-      if (autoAdd && tl.clips.length) { pushUndo(JSON.stringify({ tracks: tl.tracks, clips: [] })); changed(); }
+      if (addedClipIds.length) {
+        selected = new Set(addedClipIds);
+        pushUndo(before);
+        changed();
+      } else if (createdTrack) {
+        tl.tracks = tl.tracks.filter((x) => x !== createdTrack);
+      }
       renderMedia();
-      toast(autoAdd ? 'Geüpload en op de tijdlijn gezet' : 'Geüpload — sleep naar de tijdlijn of klik +', 'ok');
+      toast(
+        createdTrack && addedClipIds.length
+          ? `Geüpload en op nieuw spoor "${createdTrack.name}" gezet`
+          : addedClipIds.length
+            ? 'Geüpload en op het spoor gezet'
+            : 'Geüpload — sleep naar de tijdlijn of klik +',
+        'ok'
+      );
     } catch (e) { toast(e.message, 'err'); }
     finally { done(); }
   }

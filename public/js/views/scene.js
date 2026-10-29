@@ -8,6 +8,7 @@ import { renderExport, renderAudioExport, exportSupported } from '../export.js';
 export async function mount(root, { id }) {
   await ensureFonts();
   const project = await api.project(id);
+  if (project.type === 'airline') return (await import('./airline.js')).mount(root, { id, project });
   if (project.type === 'file') return (await import('./files.js')).mount(root, { id, project, exportingView: true });
   if (project.type === 'keyboard') return (await import('./keyboard.js')).mount(root, { id, project, exportingView: true });
   if (project.type === 'hack') return (await import('./hack.js')).mount(root, { id, project, exportingView: true });

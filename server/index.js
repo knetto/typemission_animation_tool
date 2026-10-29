@@ -56,24 +56,106 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
   app.get('/legacy', (_req, res) => res.sendFile(path.join(ROOT, 'index.html')));
   app.use(express.static(path.join(ROOT, 'public')));
 
+  // ---------- project folders (nested hierarchy) ----------
+  const validFolderId = (id) => {
+    if (id === null || id === undefined || id === '') return null;
+    const num = Number(id);
+    if (!Number.isInteger(num) || num <= 0) return null;
+    return db.prepare('SELECT id FROM project_folders WHERE id = ?').get(num) ? num : null;
+  };
+
+  const createsFolderCycle = (folderId, newParentId) => {
+    if (newParentId === null) return false;
+    if (Number(folderId) === Number(newParentId)) return true;
+    let cur = Number(newParentId);
+    const seen = new Set([Number(folderId)]);
+    while (cur) {
+      if (seen.has(cur)) return true;
+      seen.add(cur);
+      const row = db.prepare('SELECT parent_id FROM project_folders WHERE id = ?').get(cur);
+      cur = row ? row.parent_id : null;
+    }
+    return false;
+  };
+
+  app.get('/api/project-folders', (_req, res) => {
+    const rows = db.prepare('SELECT * FROM project_folders ORDER BY name COLLATE NOCASE ASC, id ASC').all();
+    res.json(rows);
+  });
+
+  app.post('/api/project-folders', (req, res) => {
+    const name = String(req.body?.name || '').trim().slice(0, 120);
+    if (!name) return res.status(400).json({ error: 'Mapnaam is verplicht' });
+    const rawParent = req.body?.parent_id;
+    let parentId = null;
+    if (rawParent !== null && rawParent !== undefined && rawParent !== '') {
+      parentId = validFolderId(rawParent);
+      if (!parentId) return res.status(400).json({ error: 'Bovenliggende map niet gevonden' });
+    }
+    const info = db.prepare('INSERT INTO project_folders (name, parent_id) VALUES (?, ?)').run(name, parentId);
+    res.status(201).json(db.prepare('SELECT * FROM project_folders WHERE id = ?').get(info.lastInsertRowid));
+  });
+
+  app.patch('/api/project-folders/:id', (req, res) => {
+    const folder = db.prepare('SELECT * FROM project_folders WHERE id = ?').get(req.params.id);
+    if (!folder) return res.status(404).json({ error: 'Map niet gevonden' });
+    const b = req.body || {};
+    const name = b.name !== undefined ? String(b.name).trim().slice(0, 120) : folder.name;
+    if (!name) return res.status(400).json({ error: 'Mapnaam is verplicht' });
+    let parentId = folder.parent_id;
+    if (b.parent_id !== undefined) {
+      if (b.parent_id === null || b.parent_id === '') {
+        parentId = null;
+      } else {
+        const candidate = validFolderId(b.parent_id);
+        if (!candidate) return res.status(400).json({ error: 'Doelmap niet gevonden' });
+        if (createsFolderCycle(folder.id, candidate)) {
+          return res.status(400).json({ error: 'Een map kan niet in zichzelf of een eigen submap worden geplaatst' });
+        }
+        parentId = candidate;
+      }
+    }
+    db.prepare('UPDATE project_folders SET name = ?, parent_id = ?, updated_at = ? WHERE id = ?')
+      .run(name, parentId, now(), folder.id);
+    res.json(db.prepare('SELECT * FROM project_folders WHERE id = ?').get(folder.id));
+  });
+
+  app.delete('/api/project-folders/:id', (req, res) => {
+    const folder = db.prepare('SELECT * FROM project_folders WHERE id = ?').get(req.params.id);
+    if (!folder) return res.status(404).json({ error: 'Map niet gevonden' });
+    db.exec('BEGIN');
+    try {
+      db.prepare('UPDATE project_folders SET parent_id = ?, updated_at = ? WHERE parent_id = ?').run(folder.parent_id, now(), folder.id);
+      db.prepare('UPDATE projects SET folder_id = ? WHERE folder_id = ?').run(folder.parent_id, folder.id);
+      db.prepare('DELETE FROM project_folders WHERE id = ?').run(folder.id);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    res.status(204).end();
+  });
+
   // ---------- projects ----------
   app.get('/api/projects', (_req, res) => {
     const rows = db.prepare(`
-      SELECT p.id, p.name, p.type, p.scene, p.duration, p.keyboard_opts, p.hack_opts, p.created_at, p.updated_at,
+      SELECT p.id, p.name, p.type, p.scene, p.duration, p.folder_id, p.file_opts, p.keyboard_opts, p.hack_opts, p.airline_opts, p.created_at, p.updated_at,
         (SELECT COUNT(*) FROM assets a WHERE a.project_id = p.id) AS asset_count,
         (SELECT COUNT(*) FROM project_images i WHERE i.project_id = p.id) AS image_count,
         (SELECT COUNT(*) FROM exports e WHERE e.project_id = p.id) AS export_count
       FROM projects p ORDER BY p.updated_at DESC`).all();
-    res.json(rows.map((r) => { const parsed = parseProject(r); return { ...r, keyboard_opts: parsed.keyboard_opts, hack_opts: parsed.hack_opts }; }));
+    res.json(rows.map((r) => { const parsed = parseProject(r); return { ...r, file_opts: parsed.file_opts, keyboard_opts: parsed.keyboard_opts, hack_opts: parsed.hack_opts, airline_opts: parsed.airline_opts }; }));
   });
 
   app.post('/api/projects', (req, res) => {
     const name = String(req.body?.name || 'Nieuw project').slice(0, 120);
     const scene = ['transmission', 'urgent', 'ai'].includes(req.body?.scene) ? req.body.scene : 'transmission';
-    const type = ['audio', 'file', 'keyboard', 'hack'].includes(req.body?.type) ? req.body.type : 'audio';
+    const type = ['audio', 'file', 'keyboard', 'hack', 'airline'].includes(req.body?.type) ? req.body.type : 'audio';
+    const folderId = validFolderId(req.body?.folder_id);
     const fileOpts = req.body?.file_opts && typeof req.body.file_opts === 'object' ? JSON.stringify(req.body.file_opts) : '{}';
     const hackOpts = req.body?.hack_opts && typeof req.body.hack_opts === 'object' ? JSON.stringify(req.body.hack_opts) : '{}';
-    const info = db.prepare('INSERT INTO projects (name, scene, type, file_opts, hack_opts) VALUES (?, ?, ?, ?, ?)').run(name, scene, type, fileOpts, hackOpts);
+    const airlineOpts = req.body?.airline_opts && typeof req.body.airline_opts === 'object' ? JSON.stringify(req.body.airline_opts) : '{}';
+    const info = db.prepare('INSERT INTO projects (name, scene, type, folder_id, file_opts, hack_opts, airline_opts) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, scene, type, folderId, fileOpts, hackOpts, airlineOpts);
     res.status(201).json(parseProject(db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid)));
   });
 
@@ -90,14 +172,17 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     const p = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!p) return res.status(404).json({ error: 'Project niet gevonden' });
     const b = req.body || {};
-    db.prepare(`UPDATE projects SET name = ?, scene = ?, scene_opts = ?, timeline = ?, file_opts = ?, keyboard_opts = ?, hack_opts = ?, duration = ?, updated_at = ? WHERE id = ?`).run(
+    const nextFolderId = b.folder_id !== undefined ? validFolderId(b.folder_id) : p.folder_id;
+    db.prepare(`UPDATE projects SET name = ?, scene = ?, folder_id = ?, scene_opts = ?, timeline = ?, file_opts = ?, keyboard_opts = ?, hack_opts = ?, airline_opts = ?, duration = ?, updated_at = ? WHERE id = ?`).run(
       b.name !== undefined ? String(b.name).slice(0, 120) : p.name,
       ['transmission', 'urgent', 'ai'].includes(b.scene) ? b.scene : p.scene,
+      nextFolderId,
       b.scene_opts !== undefined ? JSON.stringify(b.scene_opts) : p.scene_opts,
       b.timeline !== undefined ? JSON.stringify(b.timeline) : p.timeline,
       b.file_opts !== undefined ? JSON.stringify(b.file_opts) : p.file_opts,
       b.keyboard_opts !== undefined ? JSON.stringify(b.keyboard_opts) : p.keyboard_opts,
       b.hack_opts !== undefined ? JSON.stringify(b.hack_opts) : p.hack_opts,
+      b.airline_opts !== undefined ? JSON.stringify(b.airline_opts) : p.airline_opts,
       Number.isFinite(b.duration) ? b.duration : p.duration,
       now(), p.id,
     );
@@ -521,6 +606,42 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     } catch (e) {
       res.status(500).json({ error: 'Importeren mislukt: ' + e.message });
     }
+  });
+
+  // ---------- still images (airline homepage / boarding pass) ----------
+  const uploadStill = multer({ storage: multer.memoryStorage(), limits: { fileSize: 32 * 1024 * 1024, files: 1 } });
+  app.post('/api/projects/:id/image-exports', uploadStill.single('image'), async (req, res) => {
+    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project niet gevonden' });
+    if (project.type !== 'airline') return res.status(400).json({ error: 'Dit project ondersteunt geen afbeeldingsexport' });
+    const png = req.file?.buffer;
+    if (!png || png.length < 33 || png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' || png.toString('ascii', 12, 16) !== 'IHDR') {
+      return res.status(400).json({ error: 'Een PNG-afbeelding is vereist' });
+    }
+    const width = png.readUInt32BE(16), height = png.readUInt32BE(20);
+    if (!width || !height || width > 8192 || height > 8192 || width * height > 32e6) {
+      return res.status(400).json({ error: 'Afbeelding is te groot of heeft ongeldige afmetingen' });
+    }
+    const format = req.body.format === 'jpg' ? 'jpg' : 'png';
+    const design = req.body.design === 'ticket' ? 'ticket' : 'website';
+    const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'airline';
+    const suffix = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const filename = `${slug}-${design}-${suffix}.${format}`;
+    const inputPath = path.join(dirs.tmp, `still-${suffix}.png`);
+    const outPath = path.join(dirs.exports, filename);
+    try {
+      await fs.promises.writeFile(inputPath, png);
+      // Decode and re-encode the actual image; never trust uploaded metadata alone.
+      await runFfmpeg(['-i', inputPath, '-frames:v', '1', '-map_metadata', '-1', ...(format === 'jpg' ? ['-q:v', '2', '-pix_fmt', 'yuvj444p'] : []), outPath]);
+      const size = (await fs.promises.stat(outPath)).size;
+      const info = db.prepare('INSERT INTO exports (project_id, filename, scene, width, height, fps, duration, size) VALUES (?, ?, ?, ?, ?, 0, 0, ?)')
+        .run(project.id, filename, `airline-${design}`, width, height, size);
+      touch(project.id);
+      res.status(201).json(db.prepare('SELECT * FROM exports WHERE id = ?').get(info.lastInsertRowid));
+    } catch (e) {
+      await safeUnlink(outPath);
+      res.status(400).json({ error: 'Afbeelding exporteren mislukt: ' + e.message });
+    } finally { await safeUnlink(inputPath); }
   });
 
   // ---------- exports (browser-rendered video + soundtrack → ffmpeg mux → MP4) ----------

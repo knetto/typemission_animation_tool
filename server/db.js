@@ -70,6 +70,14 @@ export function openDb(file) {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT '{}'
     );
+
+    CREATE TABLE IF NOT EXISTS project_folders (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      parent_id   INTEGER REFERENCES project_folders(id) ON DELETE SET NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
   // Additive migration: existing projects remain Audio Terminal projects.
   const columns = db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name);
@@ -77,6 +85,8 @@ export function openDb(file) {
   if (!columns.includes('file_opts')) db.exec("ALTER TABLE projects ADD COLUMN file_opts TEXT NOT NULL DEFAULT '{}'");
   if (!columns.includes('keyboard_opts')) db.exec("ALTER TABLE projects ADD COLUMN keyboard_opts TEXT NOT NULL DEFAULT '{}'");
   if (!columns.includes('hack_opts')) db.exec("ALTER TABLE projects ADD COLUMN hack_opts TEXT NOT NULL DEFAULT '{}'");
+  if (!columns.includes('airline_opts')) db.exec("ALTER TABLE projects ADD COLUMN airline_opts TEXT NOT NULL DEFAULT '{}'");
+  if (!columns.includes('folder_id')) db.exec("ALTER TABLE projects ADD COLUMN folder_id INTEGER REFERENCES project_folders(id) ON DELETE SET NULL");
   return db;
 }
 
@@ -87,6 +97,7 @@ export const parseProject = (row) => row && ({
   file_opts: safeJson(row.file_opts, {}),
   keyboard_opts: safeJson(row.keyboard_opts, {}),
   hack_opts: safeJson(row.hack_opts, {}),
+  airline_opts: safeJson(row.airline_opts, {}),
 });
 
 function safeJson(s, fallback) {

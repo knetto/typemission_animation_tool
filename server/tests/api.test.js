@@ -279,4 +279,47 @@ test('File Terminal variants (images, login_log, email) persist and schedule int
   }
 });
 
+test('nested project folders CRUD, cycle prevention, project assignment and safe deletion', async () => {
+  // 1. Create root folder, child folder, and grandchild folder
+  const f1 = await json('POST', '/api/project-folders', { name: 'Missie 1' });
+  assert.equal(f1.status, 201);
+  assert.equal(f1.body.name, 'Missie 1');
+  assert.equal(f1.body.parent_id, null);
+
+  const f2 = await json('POST', '/api/project-folders', { name: 'Briefing', parent_id: f1.body.id });
+  assert.equal(f2.status, 201);
+  assert.equal(f2.body.parent_id, f1.body.id);
+
+  const f3 = await json('POST', '/api/project-folders', { name: 'Audio', parent_id: f2.body.id });
+  assert.equal(f3.status, 201);
+  assert.equal(f3.body.parent_id, f2.body.id);
+
+  // 2. Reject moving a folder into itself or its own descendant
+  const selfMove = await json('PATCH', `/api/project-folders/${f1.body.id}`, { parent_id: f1.body.id });
+  assert.equal(selfMove.status, 400);
+  const cycleMove = await json('PATCH', `/api/project-folders/${f1.body.id}`, { parent_id: f3.body.id });
+  assert.equal(cycleMove.status, 400);
+
+  // 3. Create project inside nested folder and move it between folders
+  const proj = await json('POST', '/api/projects', { name: 'Geheime opname', folder_id: f3.body.id });
+  assert.equal(proj.status, 201);
+  assert.equal(proj.body.folder_id, f3.body.id);
+
+  const movedProj = await json('PUT', `/api/projects/${proj.body.id}`, { folder_id: f2.body.id });
+  assert.equal(movedProj.status, 200);
+  assert.equal(movedProj.body.folder_id, f2.body.id);
+
+  // 4. Deleting middle folder f2 moves child folder f3 and project up to f1
+  const delF2 = await json('DELETE', `/api/project-folders/${f2.body.id}`);
+  assert.equal(delF2.status, 204);
+
+  const foldersAfter = (await json('GET', '/api/project-folders')).body;
+  const f3After = foldersAfter.find((f) => f.id === f3.body.id);
+  assert.equal(f3After.parent_id, f1.body.id);
+
+  const projAfter = (await json('GET', `/api/projects/${proj.body.id}`)).body;
+  assert.equal(projAfter.folder_id, f1.body.id);
+});
+
+
 

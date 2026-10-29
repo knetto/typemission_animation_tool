@@ -19,6 +19,11 @@ export const api = {
   updateProject: (id, data) => req('PUT', `/api/projects/${id}`, data),
   deleteProject: (id) => req('DELETE', `/api/projects/${id}`),
 
+  projectFolders: () => req('GET', '/api/project-folders'),
+  createProjectFolder: (data) => req('POST', '/api/project-folders', data),
+  updateProjectFolder: (id, data) => req('PATCH', `/api/project-folders/${id}`, data),
+  deleteProjectFolder: (id) => req('DELETE', `/api/project-folders/${id}`),
+
   uploadAssets: (projectId, files, extra = {}) => {
     const fd = new FormData();
     for (const f of files) fd.append('files', f, f.name || 'opname.webm');
@@ -59,6 +64,7 @@ export const api = {
   freesoundImport: (data) => req('POST', '/api/freesound/import', data),
 
   createExport: (projectId, fd) => req('POST', `/api/projects/${projectId}/exports`, fd, true),
+  createImageExport: (projectId, fd) => req('POST', `/api/projects/${projectId}/image-exports`, fd, true),
   deleteExport: (id) => req('DELETE', `/api/exports/${id}`),
 };
 
