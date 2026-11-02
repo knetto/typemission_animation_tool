@@ -1,19 +1,25 @@
 // Scene selection · live deterministic preview · frame-by-frame MP4 export
 import { $, h, fmtTime, fmtSize, toast, modal, icon, debounce } from '../util.js';
 import { api, fileUrl } from '../api.js';
-import { AudioEngine, Player, SR } from '../audio/engine.js';
+import { getProjectAudio, Player, SR } from '../audio/engine.js';
+import { showLoading } from '../loading.js';
 import { createScene, buildSoundtrack, defaultSceneOpts, normalizeSceneOpts, SCENES, W, H, ensureFonts } from '../scenes/renderer.js';
 import { renderExport, renderAudioExport, exportSupported } from '../export.js';
 
-export async function mount(root, { id }) {
-  await ensureFonts();
+export async function mount(root, { id, signal, loading }) {
+  loading ||= showLoading(root, { title: 'Export voorbereiden…', backHref: `#/project/${id}`, backLabel: 'Terug naar editor' });
+  // Preview can use fallback fonts immediately. Final video export still waits
+  // for its fonts; a slow external font request must not block navigation.
+  const fontsReady = ensureFonts();
   const project = await api.project(id);
+  if (signal?.aborted) return;
   if (project.type === 'airline') return (await import('./airline.js')).mount(root, { id, project });
   if (project.type === 'file') return (await import('./files.js')).mount(root, { id, project, exportingView: true });
   if (project.type === 'keyboard') return (await import('./keyboard.js')).mount(root, { id, project, exportingView: true });
   if (project.type === 'hack') return (await import('./hack.js')).mount(root, { id, project, exportingView: true });
   const assets = project.assets || [];
   const customSfx = await api.sfx().catch(() => []);
+  if (signal?.aborted) return;
   let exports = project.exports || [];
 
   function resolveUrl(src) {
@@ -22,18 +28,20 @@ export async function mount(root, { id }) {
     throw new Error('Onbekende bron');
   }
 
-  const engine = new AudioEngine(resolveUrl);
+  const engine = getProjectAudio(id, resolveUrl);
   let voicePcm = new Float32Array(0);
   let glitchPcm = null;
   let mixError = null;
   try {
-    const mix = await engine.renderMix(project.timeline);
+    const mix = await engine.renderMix(project.timeline, { onProgress: state => { if (!signal?.aborted) loading.update({ ...state, progress: state.progress * 0.9 }); } });
     voicePcm = mix.pcm;
     glitchPcm = mix.glitchPcm || null;
   } catch (e) {
     console.warn('Kon audio mix niet renderen:', e);
     mixError = e;
   }
+  if (signal?.aborted) return;
+  loading.update({ progress: 0.98, label: 'Voorbeeld klaarzetten…' });
 
   let mode = Object.keys(SCENES).includes(project.scene) ? project.scene : 'transmission';
   const audioPeaks = new Float32Array(800);
@@ -99,7 +107,7 @@ export async function mount(root, { id }) {
   // Side panel (Settings + Export)
   const side = h('aside', { class: 'scene-side' });
 
-  root.append(h('div', { class: 'scene-view' }, head, h('div', { class: 'scene-body' }, stageCol, side)));
+  loading.remove(); root.append(h('div', { class: 'scene-view' }, head, h('div', { class: 'scene-body' }, stageCol, side)));
 
   // Setup / reload scene
   function startRenderLoop() {
@@ -452,6 +460,8 @@ export async function mount(root, { id }) {
   renderTypeChoices();
   renderSide();
   await initScene(false);
+  fontsReady.then(() => { if (!destroyed && !signal?.aborted && scene) drawAt(+scrub.value); }).catch(() => {});
+  if (signal?.aborted) { destroyed = true; player.dispose(); cancelAnimationFrame(raf); return; }
 
   // Keyboard shortcut (space to toggle play)
   const onKey = (e) => {

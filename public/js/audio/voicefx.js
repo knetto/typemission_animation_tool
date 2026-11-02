@@ -160,20 +160,27 @@ export const VOICE_PRESETS = [
     ...voiceCore({ frequency: 118, formant: 0.97, cutoff: 5200 }),
     wet: (N, ctx, src, out) => metal(N, src, out) },
   { id: 'computer', name: 'Mother · scheepscomputer', group: 'Robot', emoji: '💠', tags: 'AI android moeder mother I Am Mother warm vrouwelijk ruimteschip', popular: true,
-    desc: 'Je eigen toonhoogte en intonatie, met een zachte vrouwelijke robotkleur, korte blikkerige galm en heel subtiel gekraak tijdens het spreken.',
-    ...voiceCore({ preservePitch: true, formant: 1.035, robotic: 0.08, warmth: 0.18, grain: 0.0025 }), latency: 0.006, tail: 0.48,
-    wet: (N, ctx, src, out, a, dur) => {
+    desc: 'Warme, herkenbare stem met een hoorbare vrouwelijke robotkleur, zachte elektronische dubbelklank, korte metaalgalm en subtiel gekraak. Behoudt je eigen toonhoogte.',
+    ...voiceCore({ preservePitch: true, formant: 1.045, robotic: 0.18, warmth: 0.18, grain: 0.0025 }), latency: 0.006, tail: 0.48,
+    wet: (N, ctx, src, out, a, dur, strength = 1) => {
+      const character = 0.35 + 0.65 * strength;
       const voice = N.filter('highpass', 75), warmth = N.filter('lowshelf', 230, 0.707, 2.5), presence = N.filter('peaking', 2700, 0.8, 1.2), air = N.filter('highshelf', 4700, 0.707, -2);
       const compressor = N.comp(-22, 1.8, 0.012, 0.18);
-      N.chain(src, voice, warmth, presence, air, compressor, out);
-      // Parallel, damped shell resonances give the voice a small metal body.
-      // The unmodulated speech path stays intact; there is no pitch carrier.
-      for (const [time, feedback, level] of [[0.0078, 0.38, 0.17], [0.0123, 0.29, 0.1]]) {
+      N.chain(src, voice, warmth, presence, air, compressor, N.gain(0.9), out);
+      // A quiet, band-limited double adds audible synthetic sidebands to the
+      // speech itself. The fundamental and clear consonant path stay intact.
+      const body = N.gain(1), electronic = N.gain(0), carrier = N.osc('sine', 34);
+      N.chain(compressor, N.filter('highpass', 360), N.filter('lowpass', 4100), body);
+      carrier.connect(electronic.gain); body.connect(electronic);
+      N.chain(electronic, N.gain(0.16 * character), out); carrier.start(0); carrier.stop(dur + 0.04);
+      // Short, damped shell resonances make the robot body perceptible without
+      // imposing a new pitch or smearing words into a long reverb.
+      for (const [time, feedback, level] of [[0.0078, 0.42, 0.28], [0.0123, 0.32, 0.17]]) {
         const shell = N.delay(time, 0.1), damping = N.filter('lowpass', 3500), returnGain = N.gain(feedback);
         N.chain(compressor, N.filter('highpass', 420), shell, damping, returnGain, shell);
-        N.chain(damping, N.filter('peaking', 1250, 1.5, 2), N.gain(level), out);
+        N.chain(damping, N.filter('peaking', 1250, 1.5, 2), N.gain(level * character), out);
       }
-      N.chain(compressor, N.delay(0.021), N.reverbIR(0.4, 3.4), N.filter('highpass', 300), N.filter('lowpass', 3800), N.gain(0.24), out);
+      N.chain(compressor, N.delay(0.021), N.reverbIR(0.4, 3.4), N.filter('highpass', 300), N.filter('lowpass', 3800), N.gain(0.3 * character), out);
       // Sparse, softly edged crackles follow speech activity, rather than
       // introducing a continuous hiss or clicks through silent pauses.
       const random = rng(193), texture = N.noise(dur + 0.04, 194), textureGain = N.gain(0);
@@ -259,7 +266,7 @@ export async function applyVoiceFx(x, sr, presetId, amount = 1) {
     N.voiceActivity = [];
     const hop = Math.max(1, Math.round(sr * 0.02));
     for (let i = 0; i < y.length; i += hop) N.voiceActivity.push([i / sr, Math.min(1, rms(y, i, Math.min(y.length, i + hop)) * inputGain / 0.02)]);
-    p.wet(N, ctx, src, ctx.destination, 1, y.length / sr);
+    p.wet(N, ctx, src, ctx.destination, 1, y.length / sr, amount);
     src.start(0);
     let wet = (await ctx.startRendering()).getChannelData(0).slice(latency);
     if (p.post) wet = p.post(wet, sr, 1);

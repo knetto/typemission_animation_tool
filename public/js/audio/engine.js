@@ -33,6 +33,7 @@ export class AudioEngine {
     this.processedReady = new Map();       // clipKey -> Float32Array (sync access for drawing)
     this.peakCache = new Map();
     this.trackRenders = new Map();          // cache voice FX independently of glitch overlays
+    this.mixRenders = new Map();            // completed/in-flight mixes shared by editor and export
   }
 
   srcKey(src) { return `${src.type}:${src.id ?? src.key}`; }
@@ -94,13 +95,44 @@ export class AudioEngine {
     return this.peakCache.get(k);
   }
 
-  // Mix timeline (or a subset of clips) into mono PCM
-  async renderMix(tl, { clipIds = null, ignoreMute = false } = {}) {
+  mixKey(tl, { clipIds = null, ignoreMute = false } = {}) {
+    return JSON.stringify([
+      tl.tracks.map(t => [t.id, t.fx || 'none', t.fxAmount ?? 1, t.gain ?? 1, !!t.mute, !!t.solo, !!t.glitch]),
+      tl.clips.map(c => [c.id, c.trackId, c.start, this.clipKey(c), c.gain, c.fadeIn, c.fadeOut]),
+      (tl.effects || []).map(e => [e.id, e.trackId, e.type, e.start, e.duration, e.enabled !== false, e.amount ?? 1, e.rate ?? 9, e.grain ?? 0.065,
+        e.dynamic === true && e.dynamicOptIn === true, e.density ?? 0.32, e.burst ?? 0.24, e.variation ?? 0.5, e.seed ?? 0,
+        e.visual !== false, e.visualAmount ?? 1, e.bits ?? 5, e.sampleRate ?? 7000, e.packetLoss ?? 0.2, e.packetRepeat ?? 0.15, e.gate ?? 0.58,
+        ['stutter', 'hitch', 'dropout', 'connection', 'digital'].map(part => e.parts?.[part] !== false)]),
+      clipIds, ignoreMute,
+    ]);
+  }
+
+  // Names, selection, zoom and scene appearance never invalidate audio.
+  renderMix(tl, options = {}) {
+    const key = this.mixKey(tl, options), listener = options.onProgress;
+    let job = this.mixRenders.get(key);
+    if (!job) {
+      job = { listeners: new Set(), progress: { progress: 0, label: 'Audiobestanden laden…' }, promise: null };
+      const report = progress => { job.progress = progress; for (const notify of job.listeners) notify(progress); };
+      const timeline = structuredClone(tl);
+      job.promise = Promise.resolve().then(() => this._renderMix(timeline, { ...options, onProgress: report })).then(result => { report({ progress: 1, label: 'Audio klaar' }); return result; });
+      this.mixRenders.set(key, job);
+      job.promise.catch(() => { if (this.mixRenders.get(key) === job) this.mixRenders.delete(key); }).finally(() => job.listeners.clear());
+      // Keep only a couple of full mixes; source/track caches handle older edits.
+      if (this.mixRenders.size > 2) this.mixRenders.delete(this.mixRenders.keys().next().value);
+    }
+    if (listener) { listener(job.progress); if (job.progress.progress < 1) job.listeners.add(listener); }
+    return job.promise;
+  }
+
+  // Mix timeline (or a subset of clips) into mono PCM.
+  async _renderMix(tl, { clipIds = null, ignoreMute = false, onProgress = () => {} } = {}) {
     const anySolo = tl.tracks.some((t) => t.solo);
     const trackOn = (t) => ignoreMute || (anySolo ? t.solo : !t.mute);
     const tracks = Object.fromEntries(tl.tracks.map((t) => [t.id, t]));
     const clips = tl.clips.filter((c) => tracks[c.trackId] && (clipIds ? clipIds.includes(c.id) : trackOn(tracks[c.trackId])));
-    const bufs = await Promise.all(clips.map((c) => this.processClip(c)));
+    let decoded = 0, rendered = 0;
+    const bufs = await Promise.all(clips.map(async c => { const pcm = await this.processClip(c); onProgress({ progress: 0.35 * ++decoded / clips.length, label: `Audioclips voorbereiden · ${decoded}/${clips.length}` }); return pcm; }));
     const base = clipIds ? Math.min(...clips.map((c) => c.start), Infinity) : 0;
     const offset = Number.isFinite(base) ? base : 0;
     // Sum each track before its effect, so overlapping lines and effect tails
@@ -110,7 +142,7 @@ export class AudioEngine {
       if (!entries.length) return null;
       const start = Math.min(...entries.map(entry => entry.start));
       const length = Math.max(...entries.map(entry => entry.start - start + entry.pcm.length));
-      const cacheKey = JSON.stringify([track.id, track.fx, track.fxAmount, entries.map(({ clip, start }) => [this.clipKey(clip), start, clip.gain, clip.fadeIn, clip.fadeOut])]);
+      const cacheKey = JSON.stringify([track.id, track.fx, track.fxAmount, entries.map(({ clip, start: at }) => [this.clipKey(clip), at - start, clip.gain, clip.fadeIn, clip.fadeOut])]);
       if (!this.trackRenders.has(cacheKey)) {
         const rendering = (async () => {
           let pcm = new Float32Array(length);
@@ -131,13 +163,16 @@ export class AudioEngine {
         rendering.catch(() => this.trackRenders.delete(cacheKey));
         if (this.trackRenders.size > 6) this.trackRenders.delete(this.trackRenders.keys().next().value);
       }
+      onProgress({ progress: 0.35 + 0.5 * rendered / tl.tracks.length, label: track.fx && track.fx !== 'none' ? `Stemeffect voorbereiden · ${track.name || 'Audiospoor'}` : 'Sporen voorbereiden…' });
       const basePcm = await this.trackRenders.get(cacheKey);
       const effects = (tl.effects || []).filter(effect => effect.trackId === track.id);
       const pcm = applyGlitchRegions(basePcm, SR, effects, offset + start / SR);
       const visual = glitchVisualEnvelope(basePcm.length, SR, effects, offset + start / SR);
+      onProgress({ progress: 0.35 + 0.5 * ++rendered / tl.tracks.length, label: `Sporen voorbereiden · ${rendered}/${tl.tracks.length}` });
       return { track, start, pcm, basePcm, visual };
     }));
     const activeTracks = renderedTracks.filter(Boolean);
+    onProgress({ progress: 0.9, label: 'Sporen samenvoegen…' });
     const total = Math.max(1, ...activeTracks.map(({ start, pcm }) => start + pcm.length));
     const mix = new Float32Array(total);
     const glitchMix = activeTracks.some(({ track, visual }) => track.glitch || visual) ? new Float32Array(total) : null;
@@ -163,6 +198,15 @@ export class AudioEngine {
   }
 }
 
+// A single retained project session bounds memory while preserving expensive
+// processing when switching between its editor and export screen.
+let projectAudio = null;
+export function getProjectAudio(projectId, resolveUrl) {
+  if (!projectAudio || projectAudio.id !== projectId) projectAudio = { id: projectId, engine: new AudioEngine(resolveUrl) };
+  projectAudio.engine.resolveUrl = resolveUrl;
+  return projectAudio.engine;
+}
+
 const decodeCache = new Map();
 export function decodeUrl(url) {
   if (!decodeCache.has(url)) {
@@ -186,6 +230,7 @@ export async function decodeArrayBuffer(ab) {
   return out;
 }
 
+const wavCache = new WeakMap();
 // Simple preview player around <audio>
 export class Player {
   constructor() {
@@ -194,11 +239,14 @@ export class Player {
     this.url = null;
     this.offset = 0;      // timeline time at audio t=0
     this._starting = false;
+    this.pcm = null;
   }
   load(pcm, offset = 0) {
+    if (this.pcm === pcm && this.url) { this.offset = offset; return; }
     this._starting = false;
     if (this.url) URL.revokeObjectURL(this.url);
-    this.url = URL.createObjectURL(encodeWav(pcm, SR));
+    if (!wavCache.has(pcm)) wavCache.set(pcm, encodeWav(pcm, SR));
+    this.url = URL.createObjectURL(wavCache.get(pcm)); this.pcm = pcm;
     this.el.src = this.url;
     this.offset = offset;
   }
@@ -212,7 +260,7 @@ export class Player {
     }
   }
   pause() { this._starting = false; this.el.pause(); }
-  dispose() { this.pause(); this.el.removeAttribute('src'); this.el.load(); if (this.url) URL.revokeObjectURL(this.url); this.url = null; }
+  dispose() { this.pause(); this.el.removeAttribute('src'); this.el.load(); if (this.url) URL.revokeObjectURL(this.url); this.url = null; this.pcm = null; }
   get playing() { return this._starting || (!this.el.paused && !this.el.ended); }
   get time() { return this.offset + this.el.currentTime; }
 }

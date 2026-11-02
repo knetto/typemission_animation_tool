@@ -106,7 +106,20 @@ export function makeSchedule(mode, voiceDur, opts) {
 }
 
 // ---------- soundtrack: TV sfx + voice, rendered offline into one buffer ----------
-export async function buildSoundtrack(mode, voice, schedule, opts) {
+const soundtrackCache = new WeakMap();
+export function buildSoundtrack(mode, voice, schedule, opts) {
+  let entries = soundtrackCache.get(voice);
+  if (!entries) { entries = new Map(); soundtrackCache.set(voice, entries); }
+  const key = JSON.stringify([mode, schedule, opts.sfx !== false, opts.sfxVolume ?? 0.7]);
+  if (!entries.has(key)) {
+    const promise = renderSoundtrack(mode, voice, schedule, opts);
+    entries.set(key, promise); promise.catch(() => entries.delete(key));
+    if (entries.size > 2) entries.delete(entries.keys().next().value);
+  }
+  return entries.get(key);
+}
+
+async function renderSoundtrack(mode, voice, schedule, opts) {
   const total = Math.ceil(schedule.total * SR), out = new Float32Array(total);
   const add = (pcm, t, g = 1) => { const s0 = Math.round(t * SR); for (let i = 0; i < pcm.length && s0 + i < total; i++) out[s0 + i] += pcm[i] * g; };
   if (opts.sfx !== false) {
@@ -885,6 +898,7 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
   return { draw, reset, setSoundtrack, setGlitch, measure: (t) => measureAudio(audioPcm, SR, t - audioOffset), schedule, mode, colors: C };
 }
 
-export async function ensureFonts() {
-  await Promise.all(['900 44px Orbitron', '700 14px Orbitron', '400 26px "Share Tech Mono"'].map((f) => document.fonts.load(f).catch(() => {})));
+let fontsReady = null;
+export function ensureFonts() {
+  return fontsReady ||= Promise.all(['900 44px Orbitron', '700 14px Orbitron', '400 26px "Share Tech Mono"'].map((f) => document.fonts.load(f).catch(() => {})));
 }

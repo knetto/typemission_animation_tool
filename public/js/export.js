@@ -31,6 +31,7 @@ async function pickConfig(width, height, fps) {
  */
 export async function renderExport({ projectId, mode, opts, voice, glitch = null, width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
   if (!exportSupported()) throw new Error('WebCodecs is not supported. Use Chrome or Edge.');
+  onProgress(0, 'Lettertypen voor de video laden…');
   await ensureFonts();
   onProgress(0, 'Preparing…');
 

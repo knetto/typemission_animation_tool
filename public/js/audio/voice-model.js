@@ -149,7 +149,7 @@ export function resynthesizeVoice(input, sr, { frequency = 110, formant = 1, cho
         const voicedWeight = voiced * clamp((6500 - f) / 2500, 0, 1);
         const color = shifted - envelope[mirror] - robotic * amount * (envelope[mirror] - meanEnvelope);
         const tilt = -warmth * amount * 0.5 * Math.log1p((f / 3000) ** 2);
-        const gain = Math.exp(clamp((color + tilt) * voicedWeight, -0.2, 0.25));
+        const gain = Math.exp(clamp((color + tilt) * voicedWeight, -0.32, 0.38));
         synthReal[k] = real[k] * gain; synthImaginary[k] = imaginary[k] * gain;
       }
       fft(synthReal, synthImaginary, true);

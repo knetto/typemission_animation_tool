@@ -1,7 +1,7 @@
 // Editor: media panel · multitrack timeline · inspector (voice FX, edits)
 import { $, h, fmtTime, toast, modal, icon, uid, clamp, debounce, encodeWav } from '../util.js';
 import { api, fileUrl } from '../api.js';
-import { AudioEngine, Player, SR, defaultTimeline, clipDefaults } from '../audio/engine.js';
+import { getProjectAudio, Player, SR, defaultTimeline, clipDefaults } from '../audio/engine.js';
 import { VOICE_PRESETS } from '../audio/voicefx.js';
 import { BUILTIN_SFX, renderBuiltin } from '../audio/sfxlib.js';
 import { detectVoiced } from '../audio/dsp.js';
@@ -25,16 +25,19 @@ const TRACK_H = 116;
 const PALETTE = ['#4f8cff', '#22d3ee', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#fb7185'];
 const FX_BY_ID = Object.fromEntries(VOICE_PRESETS.map((p) => [p.id, p]));
 
-export async function mount(root, { id }) {
+export async function mount(root, { id, signal, loading }) {
   const project = await api.project(id);
+  if (signal?.aborted) return;
   if (project.type === 'airline') return (await import('./airline.js')).mount(root, { id, project });
   if (project.type === 'file') return (await import('./files.js')).mount(root, { id, project });
   if (project.type === 'keyboard') return (await import('./keyboard.js')).mount(root, { id, project });
   if (project.type === 'hack') return (await import('./hack.js')).mount(root, { id, project });
   let assets = project.assets || [];
   let customSfx = await api.sfx().catch(() => []);
+  if (signal?.aborted) return;
   let tl = normalize(project.timeline);
-  const engine = new AudioEngine(resolveUrl);
+  const engine = getProjectAudio(id, resolveUrl);
+  let mixStateKey = engine.mixKey(tl);
   const player = new Player();
   const scrubPlayer = new ScrubPlayer(SR);
 
@@ -46,6 +49,7 @@ export async function mount(root, { id }) {
   let fxPopup = null, fxTrigger = null;
   let fxPreviewToken = 0, fxPreviewButton = null;
   let selectedEffectId = null, rangeSelection = null, rangeMode = false, effectClipboard = null;
+  let boxMode = false, activeMarquee = null;
   const openSections = new Set();
 
   function resolveUrl(src) {
@@ -66,10 +70,16 @@ export async function mount(root, { id }) {
     e.preventDefault();
     if (navigatingToExport) return;
     navigatingToExport = true;
+    const trigger = e.currentTarget, originalLabel = [...trigger.childNodes];
+    trigger.setAttribute('aria-busy', 'true'); trigger.replaceChildren(h('span', { class: 'spinner' }), 'Export openen…');
+    // Start now; the export view joins this exact pending/completed mix.
+    engine.renderMix(tl).catch(() => {});
     try {
       await api.updateProject(id, { timeline: tl, duration: contentEnd(), name: titleIn.value.trim() || 'Naamloos' });
+      clearTimeout(saveTimer); saveTimer = null;
+      if (destroyed || signal?.aborted) return;
       location.hash = `#/project/${id}/export`;
-    } catch (error) { navigatingToExport = false; toast('Opslaan mislukt: ' + error.message, 'err'); }
+    } catch (error) { navigatingToExport = false; trigger.removeAttribute('aria-busy'); trigger.replaceChildren(...originalLabel); toast('Opslaan mislukt: ' + error.message, 'err'); }
   }
   const saveState = h('span', { class: 'save-state', id: 'save-state' }, 'Opgeslagen');
   const head = h('div', { class: 'ed-head' },
@@ -91,18 +101,21 @@ export async function mount(root, { id }) {
   const snapBtn = h('button', { class: 'btn btn-sm active', id: 'snap-btn', title: 'Lijn blokken automatisch op elkaar uit', 'aria-pressed': 'true', onclick: () => { snap = !snap; snapBtn.classList.toggle('active', snap); snapBtn.setAttribute('aria-pressed', String(snap)); } }, icon('magnet'), 'Uitlijnen');
   const zoomIn = h('input', { type: 'range', min: 20, max: 300, step: 1, value: tl.zoom, id: 'zoom-range', title: 'Zoom' });
   const rangeBtn = h('button', { class: 'btn btn-sm', id: 'range-select-btn', title: 'Sleep een bereik op een spoor om daar een glitch toe te voegen (R)', 'aria-pressed': 'false', onclick: () => setRangeMode(!rangeMode) }, '↔ Bereik');
+  const selectBtn = h('button', { class: 'btn btn-sm', id: 'box-select-btn', title: 'Sleep een selectiekader, ook over bestaande clips (V). Shift/Ctrl voegt toe.', 'aria-pressed': 'false', onclick: () => setBoxMode(!boxMode) }, '▧ Selecteren');
   const transport = h('div', { class: 'transport' },
     playBtn,
     h('button', { class: 'btn btn-icon btn-ghost', title: 'Naar begin (Home)', id: 'stop-btn', onclick: () => { stopPlay(); setPlayhead(0); } }, icon('stop')),
     h('div', { class: 'sep' }), undoBtn, redoBtn, h('div', { class: 'sep' }),
     h('button', { class: 'btn btn-sm', id: 'split-btn', title: 'Splitsen bij afspeelkop (S)', onclick: () => splitAtPlayhead() }, icon('split'), 'Splitsen'),
     h('button', { class: 'btn btn-sm', id: 'delete-btn', title: 'Verwijderen (Delete)', onclick: () => deleteSelected() }, icon('trash'), 'Verwijderen'),
-    h('div', { class: 'sep' }), rangeBtn, snapBtn,
+    h('div', { class: 'sep' }), selectBtn, rangeBtn, snapBtn,
     h('div', { class: 'zoom-ctl' },
       h('button', { class: 'btn btn-icon btn-sm btn-ghost', title: 'Uitzoomen', onclick: () => setZoom(tl.zoom / 1.3) }, icon('zoomout')), zoomIn,
       h('button', { class: 'btn btn-icon btn-sm btn-ghost', title: 'Inzoomen', onclick: () => setZoom(tl.zoom * 1.3) }, icon('zoomin'))));
   const selectionStatus = h('span', { class: 'selection-status' });
-  const timelineFooter = h('div', { class: 'timeline-footer' }, selectionStatus, h('span', {}, 'Sleep om te verplaatsen · sleep de randen om in te korten · rechtermuisknop voor acties'));
+  const prepareLabel = h('span');
+  const prepareStatus = h('span', { class: 'audio-prepare-status', hidden: true, role: 'status', 'aria-live': 'polite' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), prepareLabel);
+  const timelineFooter = h('div', { class: 'timeline-footer' }, selectionStatus, h('span', {}, 'Sleep op lege ruimte om clips te selecteren · V: selectiekader · Shift/Ctrl: toevoegen'));
 
   const headsInner = h('div', { class: 'tl-heads-inner' });
   const heads = h('div', { class: 'tl-heads' }, h('div', { class: 'ruler-spacer' }, 'Sporen'), headsInner);
@@ -113,16 +126,17 @@ export async function mount(root, { id }) {
   const snapLine = h('div', { class: 'snap-line' });
   const emptyHint = h('div', { class: 'tl-empty' }, h('div', { class: 'empty-audio-icon' }, icon('wave')), h('b', {}, 'Hier begint je audio'), h('p', {}, 'Upload een bestand, neem iets op of sleep audio naar het spoor.'), h('button', { class: 'btn btn-primary', onclick: () => fileIn.click() }, icon('plus'), 'Audio toevoegen'));
   const tlCanvas = h('div', { class: 'tl-canvas' }, ruler, lanes, playheadEl, snapLine);
-  const scroller = h('div', { class: 'tl-scroll', id: 'timeline' }, tlCanvas);
+  const scroller = h('div', { class: 'tl-scroll', id: 'timeline', tabindex: '0', 'aria-label': 'Audiotijdlijn' }, tlCanvas);
   const tlWrap = h('div', { class: 'tl-wrap' }, heads, scroller, emptyHint);
   const center = h('section', { class: 'center' }, h('div', { class: 'preview-strip' }, h('div', { class: 'timeline-heading' }, h('b', {}, 'Tijdlijn'), h('span', {}, 'Maak je verhaal met audio')), bigTime), transport, tlWrap, timelineFooter);
+  $('.timeline-heading', center).append(prepareStatus);
 
   // right
   const inspector = h('div', { class: 'panel-body', id: 'inspector' });
   const right = h('aside', { class: 'panel right', 'aria-label': 'Clipinstellingen' }, h('div', { class: 'panel-heading' }, icon('edit'), 'Clip bewerken'), inspector);
 
   const layout = h('div', { class: 'ed-body' }, left, center, right);
-  root.append(h('div', { class: 'editor' }, head, layout));
+  loading?.remove(); root.append(h('div', { class: 'editor' }, head, layout));
   const disposePanels = initEditorPanels(layout, left, center, right);
 
   // ============ persistence ============
@@ -147,14 +161,17 @@ export async function mount(root, { id }) {
     selected = new Set([...selected].filter((cid) => tl.clips.some((c) => c.id === cid)));
     if (!selectedEffect()) selectedEffectId = null;
     if (rangeSelection && !tl.tracks.some(track => track.id === rangeSelection.trackId)) rangeSelection = null;
-    mixDirty = true;
-    mixRevision++;
-    endScrub(false);
-    if (player.playing || startingPlayback) stopPlay();
+    const nextAudioKey = engine.mixKey(tl), audioChanged = nextAudioKey !== mixStateKey;
+    if (audioChanged) {
+      mixStateKey = nextAudioKey; mixDirty = true; mixRevision++;
+      endScrub(false);
+      if (player.playing || startingPlayback) stopPlay();
+      prepareStatus.hidden = false; prepareLabel.textContent = 'Audio bijwerken…';
+    }
     renderTimeline();
     if (inspectorToo) renderInspector();
     markDirty();
-    scheduleMixWarmup();
+    if (audioChanged) scheduleMixWarmup();
     undoBtn.disabled = !undo.length; redoBtn.disabled = !redo.length;
   }
   function doUndo() { if (!undo.length) return; redo.push(snapshot()); restore(undo.pop()); changed(); toast('Ongedaan gemaakt', 'info', 1200); }
@@ -422,6 +439,7 @@ export async function mount(root, { id }) {
 
   // ============ timeline rendering ============
   function setRangeMode(value) {
+    if (value) setBoxMode(false);
     rangeMode = value;
     rangeBtn.classList.toggle('active', value);
     rangeBtn.setAttribute('aria-pressed', String(value));
@@ -429,6 +447,92 @@ export async function mount(root, { id }) {
     if (value) mediaTab = 'glitches';
     if (mediaTab === 'glitches') renderMedia();
     renderInspector();
+  }
+
+  function setBoxMode(value) {
+    boxMode = value;
+    selectBtn.classList.toggle('active', value); selectBtn.setAttribute('aria-pressed', String(value));
+    tlWrap.classList.toggle('box-select-mode', value);
+    if (value && rangeMode) setRangeMode(false);
+  }
+
+  // Selection capture stays on the scroller, which survives clip redraws.
+  // Clip dragging, edge trimming and ruler scrubbing keep their normal gestures.
+  scroller.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || rangeMode || event.target.closest('.ruler')) return;
+    const item = event.target.closest('.clip, .glitch-overlay, .playhead');
+    if (item && !boxMode && !event.altKey) return;
+    if (event.target.closest('button, input, select, .tl-empty')) return;
+    startBoxSelection(event);
+  }, true);
+
+  function startBoxSelection(event) {
+    event.preventDefault(); event.stopPropagation();
+    activeMarquee?.cancel(); endScrub(false); closeContextMenu();
+    scroller.focus({ preventScroll: true });
+    const previous = { selected: new Set(selected), effect: selectedEffectId, range: rangeSelection };
+    const additive = event.shiftKey || event.ctrlKey || event.metaKey;
+    const base = additive ? previous.selected : new Set();
+    const origin = lanes.getBoundingClientRect();
+    const bounds = { width: tlCanvas.clientWidth, height: Math.max(lanes.offsetHeight, scroller.clientHeight - 30) };
+    const start = { x: clamp(event.clientX - origin.left, 0, bounds.width), y: clamp(event.clientY - origin.top, 0, bounds.height) };
+    const items = [...lanes.querySelectorAll('.clip')].map(node => {
+      const rect = node.getBoundingClientRect();
+      return { node, id: node.dataset.id, left: rect.left - origin.left, right: rect.right - origin.left, top: rect.top - origin.top, bottom: rect.bottom - origin.top };
+    });
+    const box = h('div', { class: 'timeline-marquee', 'aria-hidden': 'true' }, h('span'));
+    const state = { moved: false, x: event.clientX, y: event.clientY, frame: 0, cancel: () => finish(true) }; activeMarquee = state;
+    scroller.setPointerCapture(event.pointerId);
+    function paintSelection() {
+      items.forEach(({ node, id }) => { const on = selected.has(id); node.classList.toggle('sel', on); node.setAttribute('aria-pressed', String(on)); });
+      lanes.querySelectorAll('.glitch-region.selected').forEach(node => { node.classList.remove('selected'); node.querySelector('.glitch-overlay').setAttribute('aria-pressed', 'false'); });
+      selectionStatus.textContent = `${selected.size} clips geselecteerd`; selectionStatus.classList.toggle('has-selection', selected.size > 0);
+      $('#delete-btn', transport).disabled = !selected.size;
+    }
+    function paintBox() {
+      const viewport = scroller.getBoundingClientRect(), origin = lanes.getBoundingClientRect();
+      const end = { x: clamp(clamp(state.x, viewport.left, viewport.right) - origin.left, 0, bounds.width), y: clamp(clamp(state.y, viewport.top + 30, viewport.bottom) - origin.top, 0, bounds.height) };
+      const left = Math.max(0, Math.min(start.x, end.x)), top = Math.max(0, Math.min(start.y, end.y));
+      const right = Math.max(start.x, end.x), bottom = Math.max(start.y, end.y);
+      selected = new Set(base);
+      for (const item of items) if (item.left < right && item.right > left && item.top < bottom && item.bottom > top) selected.add(item.id);
+      selectedEffectId = null; rangeSelection = null;
+      box.style.left = left + 'px'; box.style.top = top + 30 + 'px'; box.style.width = Math.max(1, right - left) + 'px'; box.style.height = Math.max(1, bottom - top) + 'px';
+      box.firstChild.textContent = `${selected.size} clips`;
+      paintSelection();
+    }
+    function frame() {
+      if (activeMarquee !== state) return;
+      const viewport = scroller.getBoundingClientRect();
+      const velocity = (at, low, high) => at < low + 24 ? -Math.min(20, (low + 24 - at) * 0.6) : at > high - 24 ? Math.min(20, (at - high + 24) * 0.6) : 0;
+      scroller.scrollLeft += velocity(state.x, viewport.left, viewport.right);
+      scroller.scrollTop += velocity(state.y, viewport.top + 30, viewport.bottom);
+      paintBox(); state.frame = requestAnimationFrame(frame);
+    }
+    function move(e) {
+      if (e.pointerId !== event.pointerId) return;
+      state.x = e.clientX; state.y = e.clientY;
+      if (!state.moved && Math.hypot(e.clientX - event.clientX, e.clientY - event.clientY) < 4) return;
+      if (!state.moved) { state.moved = true; lanes.querySelectorAll('.timeline-range').forEach(node => node.remove()); tlCanvas.append(box); tlWrap.classList.add('marquee-active'); state.frame = requestAnimationFrame(frame); }
+    }
+    function release(e) { if (e.pointerId === event.pointerId) finish(e.type !== 'pointerup'); }
+    function finish(cancel = false) {
+      if (activeMarquee !== state) return;
+      if (state.moved && !cancel) paintBox();
+      activeMarquee = null; cancelAnimationFrame(state.frame); box.remove(); tlWrap.classList.remove('marquee-active');
+      scroller.removeEventListener('pointermove', move); scroller.removeEventListener('pointerup', release); scroller.removeEventListener('pointercancel', release); scroller.removeEventListener('lostpointercapture', release);
+      if (scroller.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+      if (cancel) { selected = previous.selected; selectedEffectId = previous.effect; rangeSelection = previous.range; }
+      else if (!state.moved) {
+        selected = new Set(base); selectedEffectId = null; rangeSelection = null;
+        const clipId = event.target.closest('.clip')?.dataset.id;
+        if (clipId) selected.has(clipId) ? selected.delete(clipId) : selected.add(clipId);
+        else if (event.target.closest('.glitch-region')) { selected.clear(); selectedEffectId = event.target.closest('.glitch-region').dataset.effect; }
+        else if (!additive) setPlayhead(xToTime(event.clientX));
+      }
+      if (!destroyed) { renderTimeline(); renderInspector(); }
+    }
+    scroller.addEventListener('pointermove', move); scroller.addEventListener('pointerup', release); scroller.addEventListener('pointercancel', release); scroller.addEventListener('lostpointercapture', release);
   }
 
   function addGlitch(type, trackId = null, start = null, duration = null) {
@@ -640,6 +744,7 @@ export async function mount(root, { id }) {
   });
 
   function renderTimeline() {
+    if (activeMarquee) { activeMarquee.cancel(); return; }
     const extent = tl.effects.reduce((end, effect) => Math.max(end, effect.start + effect.duration), contentEnd());
     const width = Math.max(scroller.clientWidth || 800, (extent + 20) * tl.zoom);
     tlCanvas.style.width = width + 'px';
@@ -651,7 +756,6 @@ export async function mount(root, { id }) {
       headsInner.append(trackHead(t, color));
       const lane = h('div', { class: `track-lane${(anySolo ? !t.solo : t.mute) ? ' muted' : ''}${t.glitch ? ' glitch-track' : ''}${tl.effects.some(effect => effect.trackId === t.id) ? ' has-glitch-effects' : ''}`, 'data-track': t.id, style: { '--tc': color } });
       lane.addEventListener('pointerdown', (e) => { if (rangeMode && !e.target.closest('.glitch-overlay')) startRangeSelection(e, t, lane); }, true);
-      lane.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.target === lane) { selected.clear(); selectedEffectId = null; rangeSelection = null; setPlayhead(xToTime(e.clientX)); renderTimeline(); renderInspector(); } });
       lane.addEventListener('contextmenu', (e) => {
         if (e.target.closest('.clip, .glitch-overlay')) return;
         timelineContext(e, t);
@@ -1000,14 +1104,14 @@ export async function mount(root, { id }) {
     $('#split-btn', transport).disabled = !!selectedEffect() || !tl.clips.some((c) => (!selected.size || selected.has(c.id)) && playhead - c.start >= 0.02 && c.start + c.duration - playhead >= 0.02);
     updateEditorGlitchState();
   }
-  function scheduleMixWarmup() {
+  function scheduleMixWarmup(delay = 120) {
     clearTimeout(mixWarmupTimer);
     if (destroyed) return;
     mixWarmupTimer = setTimeout(() => {
       if (destroyed || !mixDirty || !tl.clips.length || player.playing || activeScrub) return;
-      if (mixRender) { scheduleMixWarmup(); return; }
+      if (mixRender) { mixRender.promise.then(() => { if (mixDirty) scheduleMixWarmup(0); }, () => {}); return; }
       ensureMix({ quiet: true }).catch(() => {});
-    }, 900);
+    }, delay);
   }
 
   function endScrub(resume = false) {
@@ -1059,11 +1163,14 @@ export async function mount(root, { id }) {
     const job = { revision, promise: null };
     job.promise = (async () => {
       try {
-        const { pcm } = await engine.renderMix(structuredClone(tl));
+        const { pcm } = await engine.renderMix(tl, { onProgress: ({ label }) => {
+          if (destroyed || revision !== mixRevision) return;
+          prepareStatus.hidden = false; prepareLabel.textContent = label;
+        } });
         if (destroyed || revision !== mixRevision) return false;
         mixPcm = pcm; player.load(pcm, 0); mixDirty = false;
         return true;
-      } finally { done(); if (mixRender === job) mixRender = null; }
+      } finally { done(); if (mixRender === job) { mixRender = null; prepareStatus.hidden = true; } }
     })();
     mixRender = job;
     return job.promise;
@@ -2442,7 +2549,7 @@ export async function mount(root, { id }) {
     }
     inspector.append(fxCard);
     const track = trackOf(c);
-    if (track) {
+    if (track && list.every(clip => clip.trackId === track.id)) {
       const trackPreset = FX_BY_ID[track.fx] || FX_BY_ID.none;
       const trackFxCard = h('div', { class: 'insp-card voice-effect-card' },
         h('div', { class: 'voice-effect-heading' }, h('h6', {}, 'Spooreffect'), h('span', {}, track.name)),
@@ -2458,7 +2565,7 @@ export async function mount(root, { id }) {
     }
     const startInput = h('input', { class: 'input', type: 'number', min: 0, step: 0.01, value: c.start.toFixed(2), 'aria-label': 'Starttijd in seconden', onchange: (e) => {
       const value = Number(e.target.value);
-      if (e.target.value !== '' && Number.isFinite(value) && value >= 0) mutate(() => { const delta = value - c.start; each((x) => { x.start = Math.max(0, x.start + delta); }); });
+      if (e.target.value !== '' && Number.isFinite(value) && value >= 0) mutate(() => { const delta = Math.max(value - c.start, -Math.min(...list.map(clip => clip.start))); each((x) => { x.start += delta; }); });
     } });
     inspector.append(inspectorSection('timing', 'Timing & overgangen', h('label', { class: 'field-label' }, 'Starttijd (seconden)', startInput),
       h('div', { class: 'hint' }, 'Kort een clip in door de linker- of rechterrand op de tijdlijn te slepen.'),
@@ -2479,6 +2586,7 @@ export async function mount(root, { id }) {
     if (e.target.closest('input, textarea, select, [contenteditable]')) return;
     if ($('.modal-overlay')) return;
     const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+    if (activeMarquee) { e.preventDefault(); if (k === 'escape') activeMarquee.cancel(); return; }
     if (contextMenu) { if (k === 'escape') { e.preventDefault(); closeContextMenu(true); } return; }
     if (k === ' ') { e.preventDefault(); togglePlay(); }
     else if (k === 's' && !mod && !selectedEffect()) { e.preventDefault(); splitAtPlayhead(); }
@@ -2491,8 +2599,9 @@ export async function mount(root, { id }) {
     else if (k === 'v' && mod && (clipboard.length || effectClipboard)) { e.preventDefault(); pasteClips(); }
     else if (k === 'd' && mod) { e.preventDefault(); duplicateSelected(); }
     else if (k === 'a' && mod) { e.preventDefault(); selectedEffectId = null; rangeSelection = null; selected = new Set(tl.clips.map((c) => c.id)); renderTimeline(); renderInspector(); }
-    else if (k === 'escape') { selected.clear(); selectedEffectId = null; rangeSelection = null; setRangeMode(false); renderTimeline(); renderInspector(); }
+    else if (k === 'escape') { selected.clear(); selectedEffectId = null; rangeSelection = null; setBoxMode(false); setRangeMode(false); renderTimeline(); renderInspector(); }
     else if (k === 'r' && !mod) { e.preventDefault(); setRangeMode(!rangeMode); }
+    else if (k === 'v' && !mod) { e.preventDefault(); setBoxMode(!boxMode); }
     else if (k === 'home') { setPlayhead(0); }
     else if (k === 'end') { setPlayhead(contentEnd()); }
     else if (k === 'arrowleft') { e.preventDefault(); setPlayhead(playhead - (e.shiftKey ? 0.1 : 1)); }
@@ -2517,6 +2626,7 @@ export async function mount(root, { id }) {
 
   return () => {
     destroyed = true;
+    activeMarquee?.cancel();
     document.removeEventListener('keydown', onKey);
     document.removeEventListener('pointerdown', outsideMenu);
     window.removeEventListener('resize', closeContextMenu);
