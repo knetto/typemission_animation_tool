@@ -24,16 +24,18 @@ export async function mount(root, { id }) {
 
   const engine = new AudioEngine(resolveUrl);
   let voicePcm = new Float32Array(0);
+  let glitchPcm = null;
   let mixError = null;
   try {
     const mix = await engine.renderMix(project.timeline);
     voicePcm = mix.pcm;
+    glitchPcm = mix.glitchPcm || null;
   } catch (e) {
     console.warn('Kon audio mix niet renderen:', e);
     mixError = e;
   }
 
-  let mode = ['transmission', 'urgent', 'ai'].includes(project.scene) ? project.scene : 'transmission';
+  let mode = Object.keys(SCENES).includes(project.scene) ? project.scene : 'transmission';
   const audioPeaks = new Float32Array(800);
   for (let i = 0; i < voicePcm.length; i++) {
     const bin = Math.min(799, Math.floor(i * 800 / voicePcm.length));
@@ -44,12 +46,12 @@ export async function mount(root, { id }) {
 
   const player = new Player();
   let scene = null, soundtrack = null, raf = 0, destroyed = false, exportAbort = null;
-  let sceneVersion = 0;
+  let sceneVersion = 0, pendingInit = null;
 
   // Header
   const head = h('div', { class: 'ed-head' },
     h('a', { class: 'btn btn-ghost btn-icon', href: `#/project/${id}`, title: 'Terug naar editor', id: 'back-to-editor' }, icon('back')),
-    h('span', { style: { fontSize: '18px', fontWeight: 600 } }, project.name),
+    h('span', { style: { fontSize: '18px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, title: project.name }, project.name),
     h('div', { class: 'spacer' }),
     h('nav', { class: 'steps' },
       h('a', { href: `#/project/${id}` }, '1 · Audio bewerken'),
@@ -78,7 +80,7 @@ export async function mount(root, { id }) {
         style: { '--sc': sc.c.accent, '--sc-bg': `radial-gradient(circle at 10% 50%, ${sc.c.bg2}, ${sc.c.bg1})` },
         onclick: () => setMode(key),
       },
-      h('div', { class: 'sc-ico' }, key === 'transmission' ? '📡' : key === 'urgent' ? '🚨' : '💠'),
+      h('div', { class: 'sc-ico' }, key === 'transmission' ? '📡' : key === 'urgent' ? '🚨' : key === 'ai' ? '💠' : '📟'),
       h('div', {}, h('b', {}, sc.name), h('span', {}, sc.desc)));
       sceneCardsWrap.append(card);
     });
@@ -100,36 +102,77 @@ export async function mount(root, { id }) {
   root.append(h('div', { class: 'scene-view' }, head, h('div', { class: 'scene-body' }, stageCol, side)));
 
   // Setup / reload scene
-  async function initScene(keepTime = false) {
-    const version = ++sceneVersion;
-    const curTime = keepTime ? +scrub.value : 0;
-    if (exportType === 'audio') {
-      const total = voicePcm.length / SR;
-      scene = { schedule: { total }, draw(t) {
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#0c1324'; ctx.fillRect(0, 0, W, H);
-        ctx.fillStyle = '#e6edff'; ctx.font = '600 54px sans-serif'; ctx.fillText('Alleen audio', 120, 180);
-        ctx.fillStyle = '#a0b0cc'; ctx.font = '30px sans-serif'; ctx.fillText('Je bewerkte tijdlijn · zonder videoscène of extra scenegeluiden', 120, 240);
-        const end = Math.min(1, t / (total || 1));
-        for (let x = 0; x < 800; x++) {
-          const peak = audioPeaks[x];
-          ctx.fillStyle = x / 800 <= end ? '#69a5ff' : '#293954';
-          ctx.fillRect(120 + x * 2.1, H / 2 - Math.max(3, peak * 270), 1.5, Math.max(6, peak * 540));
-        }
-        ctx.fillStyle = '#a0b0cc'; ctx.font = '28px monospace'; ctx.fillText(`${fmtTime(t, true)} / ${fmtTime(total, true)}`, 120, 900);
-      } };
-      soundtrack = voicePcm; scrub.max = total; player.load(soundtrack, 0); drawAt(curTime); return;
-    }
-    const nextScene = createScene(canvas, { mode, opts, voice: voicePcm });
-    const sched = nextScene.schedule;
-    const nextSoundtrack = await buildSoundtrack(mode, voicePcm, sched, opts);
-    if (destroyed || version !== sceneVersion) return;
-    nextScene.setSoundtrack(nextSoundtrack);
-    scene = nextScene;
-    soundtrack = nextSoundtrack;
-    scrub.max = sched.total;
-    player.load(soundtrack, 0);
-    drawAt(curTime);
+  function startRenderLoop() {
+    cancelAnimationFrame(raf);
+    const loop = () => {
+      if (destroyed) return;
+      if (!player.playing) {
+        stageOverlay.classList.add('show');
+        playOverlayBtn.replaceChildren(icon('play'));
+        return;
+      }
+      drawAt(player.time);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+  }
+
+  function initScene(keepTime = false, rebuildAudio = true) {
+    const run = (async () => {
+      const version = ++sceneVersion;
+      const wasPlaying = keepTime && player.playing;
+      const curTime = keepTime ? (wasPlaying ? player.time : +scrub.value) : 0;
+      if (!keepTime && player.playing) {
+        player.pause();
+        cancelAnimationFrame(raf);
+        stageOverlay.classList.add('show');
+        playOverlayBtn.replaceChildren(icon('play'));
+      }
+      if (exportType === 'audio') {
+        const total = voicePcm.length / SR;
+        scene = { schedule: { total }, draw(t) {
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#0c1324'; ctx.fillRect(0, 0, W, H);
+          ctx.fillStyle = '#e6edff'; ctx.font = '600 54px sans-serif'; ctx.fillText('Alleen audio', 120, 180);
+          ctx.fillStyle = '#a0b0cc'; ctx.font = '30px sans-serif'; ctx.fillText('Je bewerkte tijdlijn · zonder videoscène of extra scenegeluiden', 120, 240);
+          const end = Math.min(1, t / (total || 1));
+          for (let x = 0; x < 800; x++) {
+            const peak = audioPeaks[x];
+            ctx.fillStyle = x / 800 <= end ? '#69a5ff' : '#293954';
+            ctx.fillRect(120 + x * 2.1, H / 2 - Math.max(3, peak * 270), 1.5, Math.max(6, peak * 540));
+          }
+          ctx.fillStyle = '#a0b0cc'; ctx.font = '28px monospace'; ctx.fillText(`${fmtTime(t, true)} / ${fmtTime(total, true)}`, 120, 900);
+        } };
+        soundtrack = voicePcm; scrub.max = total; player.load(soundtrack, 0); drawAt(curTime); return;
+      }
+      const nextScene = createScene(canvas, { mode, opts, voice: voicePcm, glitch: glitchPcm });
+      const sched = nextScene.schedule;
+      if (!rebuildAudio && soundtrack && soundtrack.length) {
+        nextScene.setSoundtrack(soundtrack);
+        scene = nextScene;
+        scrub.max = sched.total;
+        drawAt(wasPlaying ? player.time : curTime);
+        return;
+      }
+      const nextSoundtrack = await buildSoundtrack(mode, voicePcm, sched, opts);
+      if (destroyed || version !== sceneVersion) return;
+      const playNow = wasPlaying || player.playing;
+      const resumeAt = playNow ? player.time || curTime : curTime;
+      nextScene.setSoundtrack(nextSoundtrack);
+      scene = nextScene;
+      soundtrack = nextSoundtrack;
+      scrub.max = sched.total;
+      player.load(soundtrack, 0);
+      drawAt(resumeAt);
+      if (playNow && resumeAt < sched.total - 0.1) {
+        stageOverlay.classList.remove('show');
+        playOverlayBtn.replaceChildren(icon('pause'));
+        await player.play(resumeAt).catch(() => {});
+        startRenderLoop();
+      }
+    })();
+    pendingInit = run;
+    return run;
   }
 
   function drawAt(t) {
@@ -142,7 +185,8 @@ export async function mount(root, { id }) {
     scrubTime.textContent = `${fmtTime(t, true)} / ${fmtTime(scene.schedule.total, true)}`;
   }
 
-  function togglePlay() {
+  async function togglePlay() {
+    if (pendingInit) await pendingInit.catch(() => {});
     if (!scene || !soundtrack) return;
     if (player.playing) {
       player.pause();
@@ -152,20 +196,16 @@ export async function mount(root, { id }) {
     } else {
       let t = +scrub.value;
       if (t >= scene.schedule.total - 0.1) t = 0;
-      player.play(t);
       stageOverlay.classList.remove('show');
       playOverlayBtn.replaceChildren(icon('pause'));
-      const loop = () => {
-        if (destroyed) return;
-        if (!player.playing) {
-          stageOverlay.classList.add('show');
-          playOverlayBtn.replaceChildren(icon('play'));
-          return;
-        }
-        drawAt(player.time);
-        raf = requestAnimationFrame(loop);
-      };
-      raf = requestAnimationFrame(loop);
+      try {
+        await player.play(t);
+      } catch (e) {
+        stageOverlay.classList.add('show');
+        playOverlayBtn.replaceChildren(icon('play'));
+        return;
+      }
+      startRenderLoop();
     }
   }
 
@@ -207,7 +247,7 @@ export async function mount(root, { id }) {
   const progressBox = h('div', { class: 'progress', style: { display: 'none' } }, h('i', { id: 'exp-bar' }));
   const expStatus = h('div', { class: 'hint mono', id: 'exp-status', style: { display: 'none' } });
   const expBtn = h('button', { class: 'btn btn-primary', id: 'start-export-btn', style: { width: '100%' } }, icon('film'), 'Exporteer MP4');
-  const exportsListEl = h('div', { style: { display: 'grid', gap: '8px' } });
+  const exportsListEl = h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', minWidth: 0, gap: '8px' } });
 
   function renderSide() {
     side.replaceChildren();
@@ -223,13 +263,13 @@ export async function mount(root, { id }) {
           class: 'input',
           placeholder: SCENES[mode].headline,
           value: opts.headline || '',
-          oninput: (e) => { opts.headline = e.target.value; initScene(true); saveOpts(); },
+          oninput: (e) => { opts.headline = e.target.value; initScene(true, false); saveOpts(); },
         })),
       h('label', { class: 'toggle' },
         h('input', {
           type: 'checkbox',
           checked: opts.hud !== false,
-          onchange: (e) => { opts.hud = e.target.checked; initScene(true); saveOpts(); },
+          onchange: (e) => { opts.hud = e.target.checked; initScene(true, false); saveOpts(); },
         }),
         h('span', { class: 'track' }),
         'HUD elementen (radar, raster, data)'),
@@ -275,7 +315,7 @@ export async function mount(root, { id }) {
         h('input', {
           type: 'checkbox',
           checked: !!opts.logoBlue,
-          onchange: (e) => { opts.logoBlue = e.target.checked; initScene(true); saveOpts(); },
+          onchange: (e) => { opts.logoBlue = e.target.checked; initScene(true, false); saveOpts(); },
         }),
         h('span', { class: 'track' }),
         'Spion-logo blauw houden') : null,
@@ -284,7 +324,14 @@ export async function mount(root, { id }) {
         h('input', {
           class: 'input',
           value: opts.aiLabel || defaultSceneOpts().aiLabel,
-          oninput: (e) => { opts.aiLabel = e.target.value; initScene(true); saveOpts(); },
+          oninput: (e) => { opts.aiLabel = e.target.value; initScene(true, false); saveOpts(); },
+        })) : null,
+      mode === 'steampunk' ? h('label', { class: 'field' },
+        'Terminal / Core label',
+        h('input', {
+          class: 'input',
+          value: opts.steampunkLabel || defaultSceneOpts().steampunkLabel,
+          oninput: (e) => { opts.steampunkLabel = e.target.value; initScene(true, false); saveOpts(); },
         })) : null);
 
     // 2. Export MP4
@@ -326,7 +373,7 @@ export async function mount(root, { id }) {
       const item = h('div', { class: 'export-item' },
         h('div', { class: 'vid-ico' }, icon(e.scene === 'audio' ? 'wave' : 'film')),
         h('div', { class: 'info' },
-          h('div', { class: 'name' }, e.filename),
+          h('div', { class: 'name', title: e.filename }, e.filename),
           h('div', { class: 'sub' }, `${e.scene === 'audio' ? e.filename.split('.').pop().toUpperCase() + ' · Alleen audio' : `${e.width}×${e.height} · ${e.fps}fps`} · ${fmtTime(e.duration)} · ${fmtSize(e.size)}`)),
         h('a', { class: 'btn btn-ghost btn-sm btn-icon', title: 'Downloaden', href: fileUrl.export(e), download: e.filename }, icon('download')),
         h('button', { class: 'btn btn-ghost btn-sm btn-icon btn-danger', title: 'Verwijderen', onclick: async () => {
@@ -370,6 +417,7 @@ export async function mount(root, { id }) {
         mode,
         opts,
         voice: voicePcm,
+        glitch: glitchPcm,
         width,
         height,
         fps: expFps,

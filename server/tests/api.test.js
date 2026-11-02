@@ -41,8 +41,9 @@ test('project CRUD', async () => {
   const c = await json('POST', '/api/projects', { name: 'Missie 1', scene: 'urgent' });
   assert.equal(c.status, 201);
   assert.equal(c.body.scene, 'urgent');
-  const u = await json('PUT', `/api/projects/${c.body.id}`, { name: 'Missie 1b', timeline: { tracks: [1] }, duration: 12.5 });
+  const u = await json('PUT', `/api/projects/${c.body.id}`, { name: 'Missie 1b', scene: 'steampunk', timeline: { tracks: [1] }, duration: 12.5 });
   assert.equal(u.body.name, 'Missie 1b');
+  assert.equal(u.body.scene, 'steampunk');
   assert.deepEqual(u.body.timeline, { tracks: [1] });
   const list = await json('GET', '/api/projects');
   assert.ok(list.body.some((p) => p.id === c.body.id && p.duration === 12.5));

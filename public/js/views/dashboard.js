@@ -9,7 +9,7 @@ import { sfxStore } from '../audio/sfxstore.js';
 import { createSfxFolders } from '../audio/sfxui.js';
 import { createFreesoundBrowser } from '../audio/freesound.js';
 
-const SCENE_COLOR = { transmission: '#3b8fe0', urgent: '#ff3b3b', ai: '#8b5cf6' };
+const SCENE_COLOR = { transmission: '#3b8fe0', urgent: '#ff3b3b', ai: '#8b5cf6', steampunk: '#22c55e' };
 
 function newProjectDialog(folderLabel = '') {
   return new Promise((resolve) => {

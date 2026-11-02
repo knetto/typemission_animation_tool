@@ -149,7 +149,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
 
   app.post('/api/projects', (req, res) => {
     const name = String(req.body?.name || 'Nieuw project').slice(0, 120);
-    const scene = ['transmission', 'urgent', 'ai'].includes(req.body?.scene) ? req.body.scene : 'transmission';
+    const scene = ['transmission', 'urgent', 'ai', 'steampunk'].includes(req.body?.scene) ? req.body.scene : 'transmission';
     const type = ['audio', 'file', 'keyboard', 'hack', 'airline'].includes(req.body?.type) ? req.body.type : 'audio';
     const folderId = validFolderId(req.body?.folder_id);
     const fileOpts = req.body?.file_opts && typeof req.body.file_opts === 'object' ? JSON.stringify(req.body.file_opts) : '{}';
@@ -175,7 +175,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     const nextFolderId = b.folder_id !== undefined ? validFolderId(b.folder_id) : p.folder_id;
     db.prepare(`UPDATE projects SET name = ?, scene = ?, folder_id = ?, scene_opts = ?, timeline = ?, file_opts = ?, keyboard_opts = ?, hack_opts = ?, airline_opts = ?, duration = ?, updated_at = ? WHERE id = ?`).run(
       b.name !== undefined ? String(b.name).slice(0, 120) : p.name,
-      ['transmission', 'urgent', 'ai'].includes(b.scene) ? b.scene : p.scene,
+      ['transmission', 'urgent', 'ai', 'steampunk'].includes(b.scene) ? b.scene : p.scene,
       nextFolderId,
       b.scene_opts !== undefined ? JSON.stringify(b.scene_opts) : p.scene_opts,
       b.timeline !== undefined ? JSON.stringify(b.timeline) : p.timeline,
@@ -652,7 +652,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     const audioOnlyExport = req.body?.scene === 'audio';
     if (!project || (audioOnlyExport ? !audio || video : !video)) { await cleanup(); return res.status(400).json({ error: 'Exportbestanden ontbreken of project bestaat niet' }); }
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'transmissie';
-    const scene = audioOnlyExport ? 'audio' : ['transmission', 'urgent', 'ai', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
+    const scene = audioOnlyExport ? 'audio' : ['transmission', 'urgent', 'ai', 'steampunk', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
     const format = audioOnlyExport ? (req.body.format === 'mp3' ? 'mp3' : 'wav') : 'mp4';
     const keySlug = req.body.keyLabel ? '-toets-' + String(req.body.keyLabel).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) : '';
     const partSlug = req.body.partLabel ? '-' + String(req.body.partLabel).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) : '';
@@ -727,7 +727,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
       return res.status(400).json({ error: 'Geen frames ontvangen of project bestaat niet' });
     }
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'transmissie';
-    const scene = ['transmission', 'urgent', 'ai', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
+    const scene = ['transmission', 'urgent', 'ai', 'steampunk', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
     const fps = [24, 25, 30, 50, 60].includes(Number(req.body.fps)) ? Number(req.body.fps) : 30;
     const format = req.body.format === 'webm' ? 'webm' : 'mov';
     const filename = `${slug}-${scene}-transparant-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${format}`;

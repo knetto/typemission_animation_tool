@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { measureAudio, formatDbfs } from '../../public/js/audio/meter.js';
 import { fitPanelWidths } from '../../public/js/editor-panels.js';
-import { buildSoundtrack, makeSchedule } from '../../public/js/scenes/renderer.js';
+import { buildSoundtrack, makeSchedule, SCENES, defaultSceneOpts, createScene } from '../../public/js/scenes/renderer.js';
 
 const sr = 48000;
 const tone = (amplitude) => Float32Array.from({ length: sr }, (_, i) => amplitude * Math.sin(2 * Math.PI * 1000 * i / sr));
@@ -54,4 +54,49 @@ test('panel widths preserve usable sidebars and timeline without overflow', () =
     }
   }
   assert.deepEqual(fitPanelWidths(1440, { left: 360, right: 420 }), { left: 360, right: 420, center: 320 });
+});
+
+test('steampunk scene defines Winter Soldier vintage automaton schedule and soundtrack', async () => {
+  assert.ok(SCENES.steampunk);
+  assert.equal(SCENES.steampunk.name, 'Phosphor Core');
+  assert.equal(SCENES.steampunk.headline, 'PHOSPHOR CORE');
+  assert.ok(defaultSceneOpts().steampunkLabel.includes('ANALOG CORE'));
+  const voice = tone(0.4);
+  const opts = { sfx: false, preDelay: 0.4, postDelay: 0.3 };
+  const schedule = makeSchedule('steampunk', voice.length / sr, opts);
+  const soundtrack = await buildSoundtrack('steampunk', voice, schedule, opts);
+  assert.ok(soundtrack.length >= Math.ceil(schedule.total * sr));
+  const active = measureAudio(soundtrack, sr, schedule.tAudio + 0.5);
+  assert.equal(active.live, true);
+  assert.ok(active.rms > 0.05);
+
+  const grad = { addColorStop() {} };
+  const ctx = new Proxy({
+    measureText: (txt) => ({ width: String(txt).length * 8 }),
+    createLinearGradient: () => grad,
+    createRadialGradient: () => grad,
+    createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    getImageData: (_x, _y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+  }, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      return () => {};
+    },
+    set(target, prop, val) {
+      target[prop] = val;
+      return true;
+    },
+  });
+  const canvas = { width: 1920, height: 1080, getContext: () => ctx };
+  const prevDoc = globalThis.document;
+  globalThis.document = { createElement: () => ({ width: 1920, height: 1080, getContext: () => ctx }) };
+  try {
+    const scene = createScene(canvas, { mode: 'steampunk', opts: { hud: true, steampunkLabel: 'ARMY BUNKER // ZOLA-70' }, voice });
+    scene.setSoundtrack(soundtrack);
+    for (const t of [0, schedule.tLogo + 0.15, schedule.tAudio + 0.5, schedule.tOutro + 0.2]) {
+      scene.draw(t);
+    }
+  } finally {
+    globalThis.document = prevDoc;
+  }
 });

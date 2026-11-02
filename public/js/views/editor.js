@@ -152,7 +152,7 @@ export async function mount(root, { id }) {
   }
 
   function createTrackObject() {
-    return { id: 't_' + uid(), name: `Audio ${tl.tracks.length + 1}`, kind: 'extra', gain: 1, mute: false, solo: false };
+    return { id: 't_' + uid(), name: `Audio ${tl.tracks.length + 1}`, kind: 'extra', gain: 1, mute: false, solo: false, glitch: false };
   }
 
   async function addSource(src, name, trackId, start, opts = {}) {
@@ -261,7 +261,7 @@ export async function mount(root, { id }) {
   }
 
   function addTrack() {
-    mutate(() => tl.tracks.push({ id: 't_' + uid(), name: `Audio ${tl.tracks.length + 1}`, kind: 'extra', gain: 1, mute: false, solo: false }));
+    mutate(() => tl.tracks.push(createTrackObject()));
   }
 
   function closeContextMenu(restoreFocus = false) {
@@ -494,7 +494,7 @@ export async function mount(root, { id }) {
     tl.tracks.forEach((t) => {
       const color = trackColor(t);
       headsInner.append(trackHead(t, color));
-      const lane = h('div', { class: `track-lane${(anySolo ? !t.solo : t.mute) ? ' muted' : ''}`, 'data-track': t.id, style: { '--tc': color } });
+      const lane = h('div', { class: `track-lane${(anySolo ? !t.solo : t.mute) ? ' muted' : ''}${t.glitch ? ' glitch-track' : ''}`, 'data-track': t.id, style: { '--tc': color } });
       lane.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.target === lane) { selected.clear(); setPlayhead(xToTime(e.clientX)); renderTimeline(); renderInspector(); } });
       lane.addEventListener('contextmenu', (e) => {
         if (e.target.closest('.clip')) return;
@@ -549,10 +549,19 @@ export async function mount(root, { id }) {
     gain.addEventListener('change', () => { if (before) pushUndo(before); before = null; changed({ inspectorToo: false }); });
     const name = h('input', { class: 'tname', value: t.name, spellcheck: 'false', 'aria-label': 'Spoornaam' });
     name.addEventListener('change', () => mutate(() => (t.name = name.value.trim() || 'Spoor')));
-    return h('div', { class: 'track-head', style: { '--tc': color } }, name,
+    return h('div', { class: `track-head${t.glitch ? ' glitch-on' : ''}`, style: { '--tc': color } }, name,
       h('div', { class: 'tbtns' },
         h('button', { class: `tbtn m${t.mute ? ' on' : ''}`, title: 'Dit spoor dempen', 'aria-pressed': String(t.mute), onclick: () => mutate(() => (t.mute = !t.mute)) }, 'Dempen'),
         h('button', { class: `tbtn s${t.solo ? ' on' : ''}`, title: 'Alleen dit spoor afspelen', 'aria-pressed': String(t.solo), onclick: () => mutate(() => (t.solo = !t.solo)) }, 'Solo'),
+        h('button', {
+          class: `tbtn g${t.glitch ? ' on' : ''}`,
+          title: 'Toon visuele ruis/glitch op het scherm telkens wanneer dit spoor geluid afspeelt',
+          'aria-pressed': String(Boolean(t.glitch)),
+          onclick: () => mutate(() => {
+            t.glitch = !t.glitch;
+            toast(t.glitch ? `Visuele ruis/glitch AAN voor "${t.name}"` : `Visuele ruis/glitch UIT voor "${t.name}"`, 'info', 1600);
+          }),
+        }, '⚡ Glitch'),
       ), h('div', { class: 'track-volume' }, icon('wave'),
         gain,
         tl.tracks.length > 1 ? h('button', { class: 'tbtn', title: 'Spoor verwijderen', onclick: async () => {
@@ -776,10 +785,27 @@ export async function mount(root, { id }) {
     placePlayhead();
     if (player.playing) player.play(playhead);
   }
+  function updateEditorGlitchState() {
+    const anySolo = tl.tracks.some((t) => t.solo);
+    let anyFiring = false;
+    tl.tracks.forEach((t, ti) => {
+      const active = Boolean(
+        player.playing &&
+        t.glitch &&
+        (anySolo ? t.solo : !t.mute) &&
+        tl.clips.some((c) => c.trackId === t.id && playhead >= c.start && playhead <= c.start + c.duration)
+      );
+      if (active) anyFiring = true;
+      lanes.children[ti]?.classList.toggle('glitch-firing', active);
+      headsInner.children[ti]?.classList.toggle('glitch-firing', active);
+    });
+    tlWrap.classList.toggle('glitch-firing', anyFiring);
+  }
   function placePlayhead() {
     playheadEl.style.transform = `translateX(${playhead * tl.zoom}px)`;
     bigTime.innerHTML = `${fmtTime(playhead, true)} <small>/ ${fmtTime(contentEnd(), true)}</small>`;
     $('#split-btn', transport).disabled = !tl.clips.some((c) => (!selected.size || selected.has(c.id)) && playhead - c.start >= 0.02 && c.start + c.duration - playhead >= 0.02);
+    updateEditorGlitchState();
   }
   async function ensureMix() {
     if (!mixDirty && mixPcm) return;
@@ -797,7 +823,7 @@ export async function mount(root, { id }) {
     cancelAnimationFrame(raf);
     const loop = () => {
       if (destroyed) return;
-      if (!player.playing) { playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; return; }
+      if (!player.playing) { playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; updateEditorGlitchState(); return; }
       playhead = player.time; placePlayhead();
       const x = playhead * tl.zoom - scroller.scrollLeft;
       if (x > scroller.clientWidth - 60 || x < 0) scroller.scrollLeft = playhead * tl.zoom - 80;
@@ -805,7 +831,7 @@ export async function mount(root, { id }) {
     };
     raf = requestAnimationFrame(loop);
   }
-  function stopPlay() { player.pause(); cancelAnimationFrame(raf); playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; }
+  function stopPlay() { player.pause(); cancelAnimationFrame(raf); playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; updateEditorGlitchState(); }
   function togglePlay() { player.playing ? stopPlay() : startPlay(); }
 
   // ============ media panel ============
@@ -2134,5 +2160,10 @@ function normalize(t) {
   const oldStarter = ['t_voice', 't_sfx', 't_music'];
   const oldNames = ['Stem', 'Sound effects', 'Muziek / extra'];
   if (!t.clips?.length && t.tracks.length === 3 && t.tracks.every((track, i) => track.id === oldStarter[i] && track.name === oldNames[i] && track.gain === (i === 2 ? 0.8 : 1) && !track.mute && !track.solo)) return { ...d, zoom: t.zoom || d.zoom };
-  return { ...d, ...t, clips: (t.clips || []).map((c) => ({ ...clipDefaults(), ...c })) };
+  return {
+    ...d,
+    ...t,
+    tracks: t.tracks.map((tr) => ({ glitch: false, ...tr, glitch: Boolean(tr.glitch) })),
+    clips: (t.clips || []).map((c) => ({ ...clipDefaults(), ...c })),
+  };
 }

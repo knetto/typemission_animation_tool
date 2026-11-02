@@ -12,9 +12,21 @@ export const SCENES = {
     c: { bg1: '#1f0306', bg2: '#5c0d14', accent: '#ff3b3b', hi: '#ff8a7a', hud: '#ff4d4d', logo: '#ff3b3b', glow: 'rgba(255,60,60,0.55)' } },
   ai: { name: 'AI / Computer', desc: 'Siri-achtige orb die op de stem reageert', headline: 'AI TRANSMISSION // S.S.S. CORE', status: 'AI CORE ONLINE',
     c: { bg1: '#05030f', bg2: '#1a0f3d', accent: '#8b5cf6', hi: '#c4b5fd', hud: '#7c6cff', logo: '#8b5cf6', glow: 'rgba(140,100,255,0.55)' } },
+  steampunk: { name: 'Phosphor Core', desc: 'Groene CRT-signaalkern & retro terminal (Winter Soldier stijl)', headline: 'PHOSPHOR CORE', status: 'SIGNAL LOCKED',
+    c: { bg1: '#010703', bg2: '#06230f', accent: '#22c55e', hi: '#86efac', hud: '#16a34a', logo: '#22c55e', glow: 'rgba(34,197,94,0.6)' } },
 };
 
-export const defaultSceneOpts = () => ({ headline: '', hud: true, sfx: true, sfxVolume: 0.7, logoBlue: false, preDelay: 1, postDelay: 0.7, aiLabel: 'S.S.S. AI ASSISTANT' });
+export const defaultSceneOpts = () => ({
+  headline: '',
+  hud: true,
+  sfx: true,
+  sfxVolume: 0.7,
+  logoBlue: false,
+  preDelay: 1,
+  postDelay: 0.7,
+  aiLabel: 'S.S.S. AI ASSISTANT',
+  steampunkLabel: 'S.S.S. ANALOG CORE // MK-I',
+});
 
 // Upgrade saved Dutch preset text while preserving custom titles and labels.
 export function normalizeSceneOpts(opts = {}) {
@@ -22,7 +34,9 @@ export function normalizeSceneOpts(opts = {}) {
   const headline = (normalized.headline || '').trim().toUpperCase();
   if (headline === 'HOOFDKWARTIER // PRIORITEIT ALPHA') normalized.headline = SCENES.urgent.headline;
   if (headline === 'AI TRANSMISSIE // S.S.S. CORE') normalized.headline = SCENES.ai.headline;
+  if (headline === 'ANALOG AI // PHOSPHOR CORE' || headline === 'ANALOG AUTOMATON // BUNKERCORE MK-I') normalized.headline = '';
   if ((normalized.aiLabel || '').trim().toUpperCase() === 'S.S.S. AI-ASSISTENT') normalized.aiLabel = defaultSceneOpts().aiLabel;
+  if ((normalized.steampunkLabel || '').trim().toUpperCase() === 'AUTOMATON // ZOLA-CORE MK-I') normalized.steampunkLabel = defaultSceneOpts().steampunkLabel;
   return normalized;
 }
 
@@ -98,7 +112,13 @@ export async function buildSoundtrack(mode, voice, schedule, opts) {
   if (opts.sfx !== false) {
     const v = opts.sfxVolume ?? 0.7;
     add(await renderBuiltin('crt_on'), schedule.tOn, v);
-    add(await renderBuiltin(mode === 'ai' ? 'data' : 'glitch'), schedule.tLogo, v * (mode === 'ai' ? 0.6 : 0.8));
+    if (mode === 'steampunk') {
+      add(await renderBuiltin('tv_click'), schedule.tLogo, v * 0.85);
+      add(await renderBuiltin('glitch'), schedule.tLogo + 0.06, v * 0.65);
+      add(await renderBuiltin('power_up'), schedule.tLogo + 0.02, v * 0.38);
+    } else {
+      add(await renderBuiltin(mode === 'ai' ? 'data' : 'glitch'), schedule.tLogo, v * (mode === 'ai' ? 0.6 : 0.8));
+    }
     if (schedule.tUrgent !== null) { add(await renderBuiltin('glitch'), schedule.tUrgent, v * 0.9); add(await renderBuiltin('alert'), schedule.tUrgent + 0.1, v * 0.45); }
     add(await renderBuiltin('crt_off'), schedule.tOff, v);
   }
@@ -109,7 +129,7 @@ export async function buildSoundtrack(mode, voice, schedule, opts) {
 }
 
 // ---------- renderer ----------
-export function createScene(canvas, { mode = 'transmission', opts = {}, voice = new Float32Array(1), soundtrack = null } = {}) {
+export function createScene(canvas, { mode = 'transmission', opts = {}, voice = new Float32Array(1), soundtrack = null, glitch = null } = {}) {
   opts = normalizeSceneOpts(opts);
   const ctx = canvas.getContext('2d');
   const off = document.createElement('canvas');
@@ -120,6 +140,7 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
   const headline = (opts.headline || scene.headline).toUpperCase();
   const schedule = makeSchedule(mode, voice.length / SR, opts);
   let audioPcm = soundtrack || voice, audioOffset = soundtrack ? 0 : schedule.tAudio;
+  let glitchPcm = glitch;
 
   // noise frames + scanline pattern
   const noiseFrames = Array.from({ length: 6 }, (_, k) => {
@@ -434,6 +455,254 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
     g.restore();
   }
 
+  function drawWinterSoldierTerminal(g, t, s, an, dt) {
+    smoothRms += ((an.live ? an.rms : 0) - smoothRms) * (1 - Math.pow(0.78, dt * 60));
+    const amp = Math.min(1, smoothRms * 4.8);
+    const uiFade = clamp01((t - s.tUi) / 0.5);
+    const coreBoot = clamp01((t - s.tLogo) / 0.9);
+    const bootEase = coreBoot < 1 ? EASE_POP(coreBoot) : 1;
+
+    // Subtle 1970s analog 60Hz mains hum flicker & occasional vertical-hold sync twitch
+    const humFlicker = 0.93 + 0.07 * Math.sin(t * 37.7) * Math.cos(t * 19.3);
+    const syncTwitch = hash(Math.floor(t * 16)) > 0.93 ? (hash(Math.floor(t * 60)) - 0.5) * 6 : 0;
+    const yJitter = Math.round(Math.sin(t * 14) * 1.2 + syncTwitch);
+
+    // 1. Aged 1970s CRT phosphor glass background (deep olive-black center, heavy curved-tube shadow)
+    g.fillStyle = '#010301';
+    g.fillRect(0, 0, W, H);
+    const bgGlow = g.createRadialGradient(W / 2, H * 0.5, 20, W / 2, H * 0.5, W * 0.56);
+    bgGlow.addColorStop(0, alpha('#0d2910', (0.72 + amp * 0.25) * humFlicker));
+    bgGlow.addColorStop(0.58, alpha('#051206', 0.85));
+    bgGlow.addColorStop(1, '#010201');
+    g.fillStyle = bgGlow;
+    g.fillRect(0, 0, W, H);
+
+    // Subtle honeycomb / shadow-mask vertical phosphor grain (like the Winter Soldier CRT glass)
+    g.save();
+    g.strokeStyle = '#15803d';
+    g.lineWidth = 2;
+    g.globalAlpha = 0.055;
+    g.beginPath();
+    for (let x = 0; x <= W; x += 12) {
+      g.moveTo(x, 0); g.lineTo(x, H);
+    }
+    g.stroke();
+
+    // Faint etched 1970s oscilloscope glass crosshair (minimal, worn physical tube markings)
+    if (opts.hud !== false) {
+      g.strokeStyle = '#22c55e';
+      g.lineWidth = 1.5;
+      g.globalAlpha = 0.11 * uiFade;
+      g.beginPath();
+      g.moveTo(140, H / 2); g.lineTo(W - 140, H / 2);
+      g.moveTo(W / 2, 160); g.lineTo(W / 2, H - 160);
+      for (let x = 240; x <= W - 240; x += 120) {
+        g.moveTo(x, H / 2 - 8); g.lineTo(x, H / 2 + 8);
+      }
+      for (let y = 220; y <= H - 220; y += 100) {
+        g.moveTo(W / 2 - 8, y); g.lineTo(W / 2 + 8, y);
+      }
+      g.stroke();
+    }
+    g.restore();
+
+    // 2. CENTERPIECE: Raw 1970s Winter-Soldier Vertical Phosphor Streaks (Chunky, aged, analog)
+    if (coreBoot > 0) {
+      const cx = W / 2, cy = 530 + yJitter;
+      g.save();
+      g.globalAlpha = humFlicker;
+      g.globalCompositeOperation = 'lighter';
+
+      // Soft warm-green phosphor persistence halo in the glass
+      const halo = g.createRadialGradient(cx, cy, 10, cx, cy, 420 * bootEase);
+      halo.addColorStop(0, alpha('#22c55e', (0.22 + amp * 0.32) * coreBoot));
+      halo.addColorStop(0.55, alpha('#14532d', (0.12 + amp * 0.16) * coreBoot));
+      halo.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = halo;
+      g.beginPath();
+      g.arc(cx, cy, 420 * bootEase, 0, Math.PI * 2);
+      g.fill();
+
+      // Faint peripheral phosphor smudges on left & right edges (just like the movie screenshot)
+      for (let p = 0; p < 18; p++) {
+        const side = p % 2 === 0 ? -1 : 1;
+        const px = cx + side * (460 + (p * 37) % 340);
+        const py = cy + ((p * 83) % 440) - 220 + Math.sin(t * 1.8 + p) * 18;
+        const ph = 40 + (p * 29) % 110;
+        const pAlpha = (0.06 + 0.08 * hash(p * 17 + Math.floor(t * 8))) * coreBoot;
+        g.fillStyle = alpha('#16a34a', pAlpha);
+        for (let sy = -ph / 2; sy < ph / 2; sy += 9) {
+          g.fillRect(px - 3.5, py + sy, 7, 5.5);
+        }
+      }
+
+      // Main 46 coarse vertical phosphor signal columns
+      const COLS = 46;
+      const spanW = 920;
+      const colStep = spanW / (COLS - 1);
+      const x0 = cx - spanW / 2;
+
+      for (let i = 0; i < COLS; i++) {
+        const u = (i / (COLS - 1)) * 2 - 1; // -1 .. +1
+        const dist = Math.abs(u);
+        const x = x0 + i * colStep;
+
+        // Audio spectrum & waveform mapping
+        const bandIdx = Math.min(HALF - 1, Math.floor(dist * (HALF - 3)));
+        const bVal = bandVals[bandIdx] || 0;
+        const wIdx = Math.min(WIN - 1, Math.floor(((i / (COLS - 1))) * (WIN - 1)));
+        const wSample = an.live ? Math.abs(win[wIdx]) : 0;
+
+        // Organic, raw vertical energy core + voice modulation envelope
+        const coreShape = Math.max(0, 1 - Math.pow(dist / 0.72, 1.55));
+        const analogDrift = 0.28 + 0.18 * Math.sin(u * 7.5 - t * 2.1) * Math.cos(u * 4.2 + t * 1.3)
+          + 0.14 * hash(i * 23 + Math.floor(t * 12));
+        const voicePower = an.live ? (bVal * 0.85 + amp * 0.95 + wSample * 1.25) : 0;
+
+        const colEnergy = clamp01((coreShape * (0.42 + voicePower * 0.95) + (1 - dist) * voicePower * 0.45 + analogDrift * coreShape * 0.55) * bootEase);
+        const halfH = Math.max(12, colEnergy * 310);
+
+        // Vertical offset & natural analog asymmetry (like Dr. Zola's raw vertical scan streaks)
+        const colShiftY = Math.sin(i * 1.1 + t * 2.2) * 22 * (0.3 + amp * 0.7);
+        const topY = cy + colShiftY - halfH;
+        const botY = cy + colShiftY + halfH;
+
+        // 1) Wide soft P31 phosphor bloom behind the column
+        const colGrad = g.createLinearGradient(x, topY - 20, x, botY + 20);
+        colGrad.addColorStop(0, 'rgba(21, 128, 61, 0)');
+        colGrad.addColorStop(0.25, alpha('#15803d', 0.22 * colEnergy));
+        colGrad.addColorStop(0.5, alpha('#22c55e', 0.36 * colEnergy));
+        colGrad.addColorStop(0.75, alpha('#15803d', 0.22 * colEnergy));
+        colGrad.addColorStop(1, 'rgba(21, 128, 61, 0)');
+        g.fillStyle = colGrad;
+        g.fillRect(x - 8, topY - 16, 16, (botY - topY) + 32);
+
+        // 2) Coarse 1970s raster-segmented vertical phosphor bar (stacked CRT scanline blocks with analog gaps)
+        const scanStep = 9; // Coarse 1970s scanline pitch
+        const startRow = Math.floor(topY / scanStep) * scanStep;
+        for (let sy = startRow; sy <= botY; sy += scanStep) {
+          const normY = Math.abs((sy - (cy + colShiftY)) / (halfH || 1));
+          if (normY > 1) continue;
+
+          // Natural breaks / gaps along the vertical streak (gives the exact Winter Soldier broken-streak texture)
+          const gapNoise = Math.sin(sy * 0.045 + i * 1.7 - t * 3.5) + (hash(i * 71 + Math.floor(sy / scanStep) * 13 + Math.floor(t * 10)) - 0.5) * 0.8;
+          if (gapNoise < -0.45 && normY > 0.22) continue;
+
+          const segIntensity = clamp01((1 - Math.pow(normY, 1.6)) * colEnergy * (0.8 + 0.25 * gapNoise));
+          if (segIntensity <= 0.04) continue;
+
+          // Slight horizontal analog jitter per scanline
+          const rowJitter = (hash(Math.floor(sy / scanStep) * 31 + Math.floor(t * 20)) - 0.5) * 1.6;
+
+          // Outer green phosphor block
+          g.fillStyle = alpha('#22c55e', 0.35 + segIntensity * 0.65);
+          g.fillRect(x - 4.2 + rowJitter, sy, 8.4, 6);
+
+          // Warm yellow-green / bright white-green core burn on intense segments
+          if (segIntensity > 0.42) {
+            g.fillStyle = alpha('#a3e635', (segIntensity - 0.35) * 0.95);
+            g.fillRect(x - 2.6 + rowJitter, sy + 0.8, 5.2, 4.4);
+          }
+          if (segIntensity > 0.68) {
+            g.fillStyle = alpha('#ecfccb', (segIntensity - 0.6) * 1.1);
+            g.fillRect(x - 1.4 + rowJitter, sy + 1.2, 2.8, 3.6);
+          }
+        }
+
+        // 3) Trailing phosphor sparks / detached vertical fragments above & below
+        const sparkSeed = i * 59 + Math.floor(t * 10);
+        if (hash(sparkSeed) > 0.38) {
+          const side = hash(sparkSeed + 1) > 0.5 ? 1 : -1;
+          const distY = halfH + 18 + hash(sparkSeed + 2) * 75;
+          const sy = Math.floor((cy + colShiftY + side * distY) / scanStep) * scanStep;
+          const count = 1 + Math.floor(hash(sparkSeed + 3) * 3);
+          g.fillStyle = alpha('#4ade80', (0.25 + colEnergy * 0.5) * humFlicker);
+          for (let k = 0; k < count; k++) {
+            g.fillRect(x - 3, sy + k * scanStep, 6, 5.5);
+          }
+        }
+      }
+      g.restore();
+    }
+
+    // 3. Minimal, raw 1970s Bunker Terminal Text (No modern boxes, no Orbitron, just raw monospace CRT readout)
+    if (uiFade > 0) {
+      g.save();
+      g.globalAlpha = uiFade * humFlicker;
+      g.fillStyle = '#4ade80';
+      g.shadowColor = 'rgba(34, 197, 94, 0.75)';
+      g.shadowBlur = 14;
+      g.textBaseline = 'middle';
+
+      const blink = Math.floor(t / 0.55) % 2 === 0;
+      const step = Math.min(1, Math.floor(clamp01((t - s.tUi) / 0.6) * 5) / 5);
+
+      // Top-left & Top-right sparse 1970s tape/system readout
+      if (opts.hud !== false) {
+        g.font = '400 23px "Share Tech Mono"';
+        g.letterSpacing = '4px';
+        g.textAlign = 'left';
+        g.fillText(`SYS.1972 // ${scene.status}`, 110, 72 + yJitter);
+        g.textAlign = 'right';
+        g.fillText(`TAPE CH-04 // ${formatDbfs(an.dbfs)}`, W - 110, 72 + yJitter);
+      }
+
+      // Top-center raw terminal headline (chunky monospace instead of futuristic Orbitron)
+      g.save();
+      g.globalAlpha = uiFade * step * humFlicker;
+      g.font = '700 38px "Share Tech Mono"';
+      g.letterSpacing = '9px';
+      g.textAlign = 'center';
+      g.fillStyle = '#86efac';
+      g.fillText(headline, W / 2, 128 + yJitter);
+      g.font = '400 18px "Share Tech Mono"';
+      g.letterSpacing = '6px';
+      g.fillStyle = alpha('#22c55e', 0.6);
+      g.fillText('----------------------------------------', W / 2, 162 + yJitter);
+      g.restore();
+
+      // Bottom-center raw terminal label & blinking block cursor
+      const labelText = (opts.steampunkLabel || defaultSceneOpts().steampunkLabel).toUpperCase();
+      const statusTxt = an.live ? 'VOICE MODULATION' : t < s.tAudio ? 'TUBE WARMUP' : 'CARRIER STANDBY';
+      g.font = '700 30px "Share Tech Mono"';
+      g.letterSpacing = '7px';
+      g.textAlign = 'center';
+      g.fillStyle = '#86efac';
+      g.fillText(`> ${labelText}${blink ? ' █' : '  '}`, W / 2, H - 126 + yJitter);
+
+      if (opts.hud !== false) {
+        const tc = Math.max(0, t - s.tUi);
+        const mm = String(Math.floor(tc / 60)).padStart(2, '0');
+        const ss = String(Math.floor(tc % 60)).padStart(2, '0');
+        const ff = String(Math.floor((tc % 1) * 24)).padStart(2, '0'); // 24fps vintage counter
+        g.font = '400 21px "Share Tech Mono"';
+        g.letterSpacing = '5px';
+        g.fillStyle = alpha('#4ade80', 0.78);
+        g.textAlign = 'left';
+        g.fillText(`REEL ${mm}:${ss}:${ff}`, 110, H - 72 + yJitter);
+        g.textAlign = 'center';
+        g.fillText(`[ ${statusTxt} ]`, W / 2, H - 72 + yJitter);
+        g.textAlign = 'right';
+        g.fillText('P1-PHOSPHOR // 60HZ', W - 110, H - 72 + yJitter);
+      }
+      g.restore();
+    }
+
+    // 4. Heavy 1970s CRT scanline bars & deep curved-corner tube vignette
+    g.save();
+    g.fillStyle = 'rgba(0, 0, 0, 0.36)';
+    for (let y = 0; y < H; y += 6) {
+      g.fillRect(0, y, W, 2.5);
+    }
+    const tubeVig = g.createRadialGradient(W / 2, H / 2, W * 0.24, W / 2, H / 2, W * 0.62);
+    tubeVig.addColorStop(0, 'rgba(0,0,0,0)');
+    tubeVig.addColorStop(0.7, 'rgba(0,4,1,0.42)');
+    tubeVig.addColorStop(1, 'rgba(0,0,0,0.92)');
+    g.fillStyle = tubeVig;
+    g.fillRect(0, 0, W, H);
+    g.restore();
+  }
+
   function drawOverlays(g, t, s) {
     // alarm wash (urgent)
     if (s.tUrgent !== null && t >= s.tUrgent) {
@@ -458,6 +727,11 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
 
   function drawContent(g, t, s, dt) {
     const an = analyse(t);
+    if (mode === 'steampunk') {
+      drawWinterSoldierTerminal(g, t, s, an, dt);
+      drawOverlays(g, t, s);
+      return;
+    }
     drawBackground(g, t);
     drawHud(g, t);
     if (opts.hud !== false) drawBars(g, t, s);
@@ -480,12 +754,63 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
     drawOverlays(g, t, s);
   }
 
-  function noiseLevel(t, s) {
+  function trackGlitchLevel(t, s) {
+    if (!glitchPcm?.length || t < s.tAudio || t > s.tAudioEnd) return 0;
+    const m = measureAudio(glitchPcm, SR, t - s.tAudio, 0.045);
+    if (!m.live || m.peak < 0.004) return 0;
+    return clamp01(Math.max(0.28, m.rms * 3.2, m.peak * 1.15));
+  }
+
+  function noiseLevel(t, s, gl = 0) {
     const bursts = [[s.tOn, 0.55, 1.2], [s.tLogo, 0.15, 0.3], [s.tOff, 0.4, 0.7]];
     if (s.tUrgent !== null) bursts.push([s.tUrgent, 0.12, 0.25]);
     let n = 0;
     for (const [t0, peak, d] of bursts) { const p = (t - t0) / d; if (p >= 0 && p < 1) n = Math.max(n, peak * (1 - p) * (0.6 + 0.4 * hash(Math.floor(t * 60)))); }
+    if (gl > 0) n = Math.max(n, gl * (0.24 + 0.22 * hash(Math.floor(t * 60) + 17)));
     return n;
+  }
+
+  function drawTrackGlitch(g, t, gl, scale) {
+    if (gl <= 0.02) return;
+    const tick = Math.floor(t * 48);
+    const sliceCount = 3 + Math.floor(hash(tick * 13 + 5) * 4);
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    for (let i = 0; i < sliceCount; i++) {
+      const seed = tick * 37 + i * 19;
+      const yNorm = hash(seed + 1);
+      const hNorm = (0.018 + hash(seed + 2) * 0.085) * (0.55 + gl * 0.65);
+      const sy = Math.floor(yNorm * canvas.height);
+      const sh = Math.max(2, Math.min(canvas.height - sy, Math.floor(hNorm * canvas.height)));
+      const dx = (hash(seed + 3) - 0.5) * 52 * gl * scale;
+      g.drawImage(off, 0, sy, canvas.width, sh, dx, sy, canvas.width, sh);
+      if (hash(seed + 4) > 0.45) {
+        g.globalCompositeOperation = 'screen';
+        g.globalAlpha = 0.28 * gl;
+        g.fillStyle = i % 2 === 0 ? C.accent : C.hi;
+        g.fillRect(0, sy, canvas.width, Math.max(2, Math.floor(sh * 0.28)));
+        g.globalAlpha = 1;
+        g.globalCompositeOperation = 'source-over';
+      }
+    }
+    // Horizontal static tear bars in logical 1920x1080 space
+    g.setTransform(scale, 0, 0, scale, 0, 0);
+    const nf = noiseFrames[tick % noiseFrames.length];
+    const barCount = 2 + Math.floor(hash(tick * 23 + 9) * 3);
+    g.imageSmoothingEnabled = false;
+    for (let b = 0; b < barCount; b++) {
+      const bSeed = tick * 53 + b * 29;
+      const by = Math.floor(hash(bSeed + 1) * (H - 40));
+      const bh = Math.floor((6 + hash(bSeed + 2) * 28) * (0.5 + gl * 0.7));
+      g.globalCompositeOperation = 'screen';
+      g.globalAlpha = (0.18 + hash(bSeed + 3) * 0.28) * gl;
+      g.drawImage(nf, 0, Math.floor(hash(bSeed + 4) * 140), 320, 24, 0, by, W, bh);
+      g.globalAlpha = 0.35 * gl;
+      g.fillStyle = C.hi;
+      g.fillRect(0, by, W, 1.5);
+    }
+    g.imageSmoothingEnabled = true;
+    g.restore();
   }
 
   // ---------- main draw ----------
@@ -495,6 +820,7 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
     const dt = lastT === null ? 1 / 60 : Math.min(0.1, Math.max(0, t - lastT));
     lastT = t;
     const s = schedule, scale = canvas.width / W;
+    const gl = trackGlitchLevel(t, s);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1; ctx.filter = 'none'; ctx.globalCompositeOperation = 'source-over';
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -511,10 +837,15 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
       drawContent(octx, t, s, dt);
       octx.globalAlpha = 1;
       ctx.save();
-      ctx.translate(canvas.width / 2, canvas.height / 2); ctx.scale(crt.sx, crt.sy); ctx.translate(-canvas.width / 2, -canvas.height / 2);
-      if (crt.b !== 1 || crt.s !== 1) ctx.filter = `brightness(${crt.b.toFixed(2)}) saturate(${crt.s.toFixed(2)})`;
+      const gTick = Math.floor(t * 50);
+      const jx = gl > 0 ? (hash(gTick * 11 + 1) - 0.5) * 12 * gl * scale : 0;
+      const jy = gl > 0 ? (hash(gTick * 11 + 2) - 0.5) * 5 * gl * scale : 0;
+      ctx.translate(canvas.width / 2 + jx, canvas.height / 2 + jy); ctx.scale(crt.sx, crt.sy); ctx.translate(-canvas.width / 2, -canvas.height / 2);
+      const gb = gl > 0 ? crt.b * (1 + (hash(gTick * 11 + 3) - 0.35) * 0.28 * gl) : crt.b;
+      if (gb !== 1 || crt.s !== 1) ctx.filter = `brightness(${gb.toFixed(2)}) saturate(${crt.s.toFixed(2)})`;
       ctx.drawImage(off, 0, 0);
       ctx.restore(); ctx.filter = 'none';
+      if (gl > 0) drawTrackGlitch(ctx, t, gl, scale);
     } else if (t >= s.tOn && t < s.tOff) {
       analyse(t);
     }
@@ -539,7 +870,7 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
       ctx.fillStyle = dg; ctx.fillRect(W / 2 - r * 2, H / 2 - r * 2, r * 4, r * 4);
     }
     // static noise
-    const nl = noiseLevel(t, s);
+    const nl = noiseLevel(t, s, gl);
     if (nl > 0.01) {
       ctx.globalAlpha = nl; ctx.globalCompositeOperation = 'screen'; ctx.imageSmoothingEnabled = false;
       ctx.drawImage(noiseFrames[Math.floor(t * 60) % noiseFrames.length], 0, 0, W, H);
@@ -550,7 +881,8 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
   function reset() { heights.fill(0); lastT = null; smoothRms = 0; }
 
   function setSoundtrack(pcm) { audioPcm = pcm; audioOffset = 0; reset(); }
-  return { draw, reset, setSoundtrack, measure: (t) => measureAudio(audioPcm, SR, t - audioOffset), schedule, mode, colors: C };
+  function setGlitch(pcm) { glitchPcm = pcm; }
+  return { draw, reset, setSoundtrack, setGlitch, measure: (t) => measureAudio(audioPcm, SR, t - audioOffset), schedule, mode, colors: C };
 }
 
 export async function ensureFonts() {

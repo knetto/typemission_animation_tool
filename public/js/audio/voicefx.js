@@ -111,6 +111,19 @@ export const VOICE_PRESETS = [
     ...communication({ lo: 140, hi: 5500, presence: 0.5, ratio: 1.5 }) },
 
   // ---------- Karakter ----------
+  { id: 'vintage_robot', name: 'Ouderwetse Robot (Bunker)', group: 'Karakter', emoji: '⚙️', desc: 'Analoge buizen-computerstem met bandruis en mechanische resonantie (Winter Soldier stijl).', popular: true, latency: 0.006, tail: 0.35,
+    wet: (N, ctx, src, out, a, dur) => {
+      const stages = [N.filter('peaking', 1350, 1.1, 3.2), N.shaper(2.6), N.comp(-24, 4.5, 0.006, 0.14)];
+      const filtered = band(N, src, 320, 3100, stages);
+      const mid = N.gain(1);
+      ring(N, ctx, filtered, mid, 44, 0.38);
+      const comb = N.delay(0.011, 0.1), fb = N.gain(0.42);
+      mid.connect(comb); comb.connect(fb); fb.connect(comb);
+      const room = N.reverbIR(0.35, 3.5), rg = N.gain(0.18);
+      comb.connect(out); mid.connect(out); mid.connect(room); room.connect(rg); rg.connect(out);
+      bed(N, out, dur, { f: 1900, q: 0.7, level: 0.0035, seed: 17 });
+    },
+    post: (y, sr) => telephoneCodec(y, sr, { rate: 11025, bits: 7 }) },
   { id: 'robot', name: 'Robot', group: 'Karakter', emoji: '🤖', desc: 'Metalen robotstem',
     wet: (N, ctx, src, out) => { const mid = N.gain(1); ring(N, ctx, src, mid, 55, 0.85); const comb = N.delay(0.009, 0.1), fb = N.gain(0.55); mid.connect(comb); comb.connect(fb); fb.connect(comb); const sh = N.shaper(2); comb.connect(sh); mid.connect(sh); sh.connect(out); } },
   { id: 'computer', name: 'Computer / AI', group: 'Karakter', emoji: '💠', desc: 'Strakke synthetische AI-stem', pitch: -1,

@@ -29,14 +29,14 @@ async function pickConfig(width, height, fps) {
  * Render a project scene to MP4 and upload it.
  * @param {object} o { projectId, mode, opts, voice(Float32Array@SR), width, height, fps, onProgress(p, label), signal }
  */
-export async function renderExport({ projectId, mode, opts, voice, width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
+export async function renderExport({ projectId, mode, opts, voice, glitch = null, width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
   if (!exportSupported()) throw new Error('WebCodecs is not supported. Use Chrome or Edge.');
   await ensureFonts();
   onProgress(0, 'Preparing…');
 
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
-  const scene = createScene(canvas, { mode, opts, voice });
+  const scene = createScene(canvas, { mode, opts, voice, glitch });
   const sched = scene.schedule;
   const soundtrack = await buildSoundtrack(mode, voice, sched, opts);
   scene.setSoundtrack(soundtrack);

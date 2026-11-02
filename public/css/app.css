@@ -175,6 +175,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .card-thumb.transmission { background: radial-gradient(circle at 50% 45%, #0a3a78, #041633 70%); }
 .card-thumb.urgent { background: radial-gradient(circle at 50% 45%, #5c0d14, #1f0306 70%); }
 .card-thumb.ai { background: radial-gradient(circle at 50% 45%, #1a0f3d, #05030f 70%); }
+.card-thumb.steampunk { background: radial-gradient(circle at 50% 45%, #0a3818, #010602 70%); }
 .card-thumb::after { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.22) 0 2px, transparent 2px 4px); pointer-events: none; }
 .card-thumb svg { width: 96px; height: 78px; transition: transform 0.5s var(--ease); filter: drop-shadow(0 0 14px currentColor); }
 .card:hover .card-thumb svg { transform: scale(1.08); }
@@ -687,6 +688,7 @@ body.is-dragging-item .folder-crumb svg {
 .tbtn:hover { color: var(--text); }
 .tbtn.m.on { background: #f59e0b; border-color: #f59e0b; color: #111; }
 .tbtn.s.on { background: #22c55e; border-color: #22c55e; color: #052; }
+.tbtn.g.on { background: linear-gradient(135deg, #22d3ee, #a855f7); border-color: #67e8f9; color: #fff; box-shadow: 0 0 12px rgba(34, 211, 238, 0.45); }
 .track-head input[type=range] { height: 16px; flex: 1; }
 .add-track { margin: 10px; }
 
@@ -727,7 +729,7 @@ body.is-dragging-item .folder-crumb svg {
 .kbd-list { display: grid; gap: 6px; margin-top: 18px; text-align: left; }
 .kbd-list div { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
 kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius: 5px; background: rgba(140, 170, 255, 0.12); border: 1px solid var(--line-2); color: var(--text); }
-.insp-card { border-radius: 13px; padding: 12px; background: rgba(18, 24, 44, 0.5); border: 1px solid var(--line); display: grid; gap: 10px; animation: cardIn 0.3s var(--ease) both; }
+.insp-card { border-radius: 13px; padding: 12px; background: rgba(18, 24, 44, 0.5); border: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; animation: cardIn 0.3s var(--ease) both; }
 .insp-card h6 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .slider-row { display: grid; grid-template-columns: 74px 1fr 52px; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
 .slider-row output { font-family: var(--mono); font-size: 12px; text-align: right; color: var(--text); }
@@ -743,9 +745,9 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 
 /* ============ Scene & export ============ */
 .scene-view { height: calc(100vh - var(--topbar)); display: grid; grid-template-rows: auto 1fr; overflow: hidden; }
-.scene-body { display: grid; grid-template-columns: 1fr 380px; min-height: 0; }
+.scene-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; min-height: 0; min-width: 0; }
 .stage-col { padding: 22px; display: grid; grid-template-rows: auto 1fr auto; gap: 16px; min-height: 0; min-width: 0; }
-.scene-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.scene-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .scene-card { position: relative; border-radius: 14px; padding: 14px 16px; cursor: pointer; border: 1px solid var(--line); background: rgba(18, 24, 44, 0.5); transition: 0.25s var(--ease); display: flex; gap: 12px; align-items: center; overflow: hidden; }
 .scene-card::before { content: ''; position: absolute; inset: 0; opacity: 0; transition: opacity 0.3s; background: var(--sc-bg); }
 .scene-card > * { position: relative; }
@@ -768,22 +770,25 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .scrub { display: flex; align-items: center; gap: 12px; }
 .scrub .mono { font-size: 13px; color: var(--muted); min-width: 92px; }
 .scrub .tl-marks { position: relative; flex: 1; }
-.scene-side { border-left: 1px solid var(--line); background: rgba(8, 12, 26, 0.4); overflow-y: auto; padding: 18px; display: grid; align-content: start; gap: 14px; }
-.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 11px; background: rgba(5, 8, 20, 0.5); border: 1px solid var(--line); }
-.seg button { height: 32px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; font-size: 13px; color: var(--muted); transition: 0.2s; }
+.scene-side { border-left: 1px solid var(--line); background: rgba(8, 12, 26, 0.4); overflow-y: auto; overflow-x: hidden; padding: 18px; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; align-content: start; gap: 14px; }
+.scene-side > * { min-width: 0; max-width: 100%; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 11px; background: rgba(5, 8, 20, 0.5); border: 1px solid var(--line); min-width: 0; }
+.seg button { height: 32px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; font-size: 13px; color: var(--muted); transition: 0.2s; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .seg button.on { background: var(--grad-soft); color: #fff; box-shadow: inset 0 0 0 1px rgba(120, 140, 255, 0.4); }
 .progress { height: 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); overflow: hidden; position: relative; }
 .progress i { display: block; height: 100%; width: 0; background: var(--grad); border-radius: 10px; transition: width 0.25s var(--ease); position: relative; overflow: hidden; }
 .progress i::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent); animation: shimmer 1.4s linear infinite; background-size: 200% 100%; }
-.export-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(18, 24, 44, 0.5); animation: cardIn 0.35s var(--ease) both; }
-.export-item .info { flex: 1; min-width: 0; }
+.export-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: rgba(18, 24, 44, 0.5); animation: cardIn 0.35s var(--ease) both; min-width: 0; max-width: 100%; }
+.export-item .info { flex: 1; min-width: 0; overflow: hidden; }
 .export-item .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.export-item .sub { font-size: 11.5px; color: var(--dim); }
+.export-item .sub { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .export-item .vid-ico { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--grad-soft); color: #c7d2fe; flex-shrink: 0; }
+.export-item .btn { flex-shrink: 0; }
 
 @media (max-width: 1200px) {
   .ed-body { grid-template-columns: 250px 1fr 280px; }
-  .scene-body { grid-template-columns: 1fr 330px; }
+  .scene-body { grid-template-columns: minmax(0, 1fr) 330px; }
+  .scene-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* Audio workspace: clear blocks, compact controls and progressive settings. */
@@ -835,9 +840,26 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .editor .ruler-spacer { position: relative; z-index: 1; background: #121b2d; }
 .editor .tl-heads-inner { overflow: visible; }
 .editor .track-head, .editor .track-lane { height: 116px; }
-.editor .track-head { padding: 12px; gap: 10px; }
+.editor .track-head { padding: 12px 10px; gap: 10px; }
 .editor .track-head .tname { font-size: 13px; padding-left: 0; }
-.editor .tbtn { width: auto; height: 25px; padding: 0 8px; font-weight: 500; }
+.editor .tbtn { width: auto; height: 24px; padding: 0 6px; font-size: 10.5px; font-weight: 500; white-space: nowrap; }
+.editor .track-lane.glitch-track {
+  background-image:
+    repeating-linear-gradient(0deg, rgba(34, 211, 238, 0.025) 0, rgba(34, 211, 238, 0.025) 2px, transparent 2px, transparent 5px),
+    repeating-linear-gradient(90deg, transparent 0, transparent 89px, rgba(167, 185, 220, .035) 89px, rgba(167, 185, 220, .035) 90px);
+}
+.editor .track-lane.glitch-firing {
+  box-shadow: inset 0 0 0 1.5px rgba(34, 211, 238, 0.7), inset 0 0 24px rgba(168, 85, 247, 0.28);
+  animation: laneGlitchPulse 0.12s steps(2) infinite;
+}
+.editor .track-head.glitch-firing .tbtn.g.on {
+  box-shadow: 0 0 16px #22d3ee, 0 0 6px #fff;
+}
+@keyframes laneGlitchPulse {
+  0% { filter: brightness(1); }
+  50% { filter: brightness(1.16) contrast(1.08); }
+  100% { filter: brightness(0.96); }
+}
 .track-volume { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .track-volume .ico { color: var(--dim); }
 .editor .track-volume input { min-width: 0; width: 100%; }

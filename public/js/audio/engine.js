@@ -12,7 +12,7 @@ export function defaultTimeline() {
     version: 1,
     zoom: 90,
     tracks: [
-      { id: 't_voice', name: 'Audio 1', kind: 'voice', gain: 1, mute: false, solo: false },
+      { id: 't_voice', name: 'Audio 1', kind: 'voice', gain: 1, mute: false, solo: false, glitch: false },
     ],
     clips: [],
   };
@@ -99,21 +99,33 @@ export class AudioEngine {
     let total = 1;
     clips.forEach((c, i) => { total = Math.max(total, Math.round((c.start - offset) * SR) + bufs[i].length); });
     const mix = new Float32Array(total);
+    const hasGlitchTrack = clips.some((c) => Boolean(tracks[c.trackId]?.glitch));
+    const glitchMix = hasGlitchTrack ? new Float32Array(total) : null;
     clips.forEach((c, i) => {
       const y = bufs[i], s0 = Math.round((c.start - offset) * SR);
-      const g = c.gain * (tracks[c.trackId].gain ?? 1);
+      const tr = tracks[c.trackId];
+      const g = c.gain * (tr.gain ?? 1);
+      const isGlitch = Boolean(tr.glitch);
       const dlen = Math.round(c.duration * SR), fi = c.fadeIn * SR, fo = c.fadeOut * SR;
       for (let k = 0; k < y.length; k++) {
         let env = 1;
         if (fi > 0 && k < fi) env = k / fi;
         if (fo > 0) { if (k >= dlen) env = 0; else if (k > dlen - fo) env = Math.min(env, (dlen - k) / fo); }
-        mix[s0 + k] += y[k] * g * env;
+        const val = y[k] * g * env;
+        mix[s0 + k] += val;
+        if (isGlitch && glitchMix) glitchMix[s0 + k] += val;
       }
     });
     let peak = 0;
     for (let i = 0; i < mix.length; i++) { const v = Math.abs(mix[i]); if (v > peak) peak = v; }
-    if (peak > 0.98) { const s = 0.98 / peak; for (let i = 0; i < mix.length; i++) mix[i] *= s; }
-    return { pcm: mix, duration: mix.length / SR, offset };
+    if (peak > 0.98) {
+      const s = 0.98 / peak;
+      for (let i = 0; i < mix.length; i++) {
+        mix[i] *= s;
+        if (glitchMix) glitchMix[i] *= s;
+      }
+    }
+    return { pcm: mix, glitchPcm: glitchMix, duration: mix.length / SR, offset };
   }
 }
 
@@ -147,19 +159,26 @@ export class Player {
     this.el.preload = 'auto';
     this.url = null;
     this.offset = 0;      // timeline time at audio t=0
+    this._starting = false;
   }
   load(pcm, offset = 0) {
+    this._starting = false;
     if (this.url) URL.revokeObjectURL(this.url);
     this.url = URL.createObjectURL(encodeWav(pcm, SR));
     this.el.src = this.url;
     this.offset = offset;
   }
   async play(from = 0) {
-    this.el.currentTime = Math.max(0, from - this.offset);
-    await this.el.play();
+    this._starting = true;
+    try {
+      this.el.currentTime = Math.max(0, from - this.offset);
+      await this.el.play();
+    } finally {
+      this._starting = false;
+    }
   }
-  pause() { this.el.pause(); }
+  pause() { this._starting = false; this.el.pause(); }
   dispose() { this.pause(); this.el.removeAttribute('src'); this.el.load(); if (this.url) URL.revokeObjectURL(this.url); this.url = null; }
-  get playing() { return !this.el.paused && !this.el.ended; }
+  get playing() { return this._starting || (!this.el.paused && !this.el.ended); }
   get time() { return this.offset + this.el.currentTime; }
 }
