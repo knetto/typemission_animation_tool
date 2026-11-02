@@ -35,6 +35,7 @@ export async function mount(root, { id }) {
   const player = new Player();
 
   let selected = new Set(), playhead = 0, snap = true, raf = 0, mixPcm = null, mixDirty = true, destroyed = false;
+  let mixRender = null, mixRevision = 0, playRequest = 0, startingPlayback = false;
   const undo = [], redo = [];
   let clipboard = [], contextMenu = null, menuReturnFocus = null;
   let fxPopup = null, fxTrigger = null;
@@ -137,7 +138,8 @@ export async function mount(root, { id }) {
   function changed({ inspectorToo = true } = {}) {
     selected = new Set([...selected].filter((cid) => tl.clips.some((c) => c.id === cid)));
     mixDirty = true;
-    if (player.playing) stopPlay();
+    mixRevision++;
+    if (player.playing || startingPlayback) stopPlay();
     renderTimeline();
     if (inspectorToo) renderInspector();
     markDirty();
@@ -819,16 +821,41 @@ export async function mount(root, { id }) {
     updateEditorGlitchState();
   }
   async function ensureMix() {
-    if (!mixDirty && mixPcm) return;
-    const done = busy('Mixen…');
-    try { const { pcm } = await engine.renderMix(tl); mixPcm = pcm; player.load(pcm, 0); mixDirty = false; }
-    finally { done(); }
+    if (!mixDirty && mixPcm) return true;
+    if (mixRender?.revision === mixRevision) return mixRender.promise;
+    const revision = mixRevision, done = busy('Audio voorbereiden…');
+    const job = { revision, promise: null };
+    job.promise = (async () => {
+      try {
+        const { pcm } = await engine.renderMix(structuredClone(tl));
+        if (destroyed || revision !== mixRevision) return false;
+        mixPcm = pcm; player.load(pcm, 0); mixDirty = false;
+        return true;
+      } finally { done(); if (mixRender === job) mixRender = null; }
+    })();
+    mixRender = job;
+    return job.promise;
   }
   async function startPlay() {
     if (!tl.clips.length) return toast('Voeg eerst audio toe aan de tijdlijn', 'info');
-    try { await ensureMix(); } catch (e) { return toast('Mixen mislukt: ' + e.message, 'err'); }
+    const request = ++playRequest;
+    startingPlayback = true;
+    playBtn.replaceChildren(h('span', { class: 'spinner' }));
+    playBtn.title = 'Audio voorbereiden · klik om te stoppen';
+    playBtn.setAttribute('aria-busy', 'true');
+    try {
+      const ready = await ensureMix();
+      if (!ready || destroyed || request !== playRequest) return;
+    } catch (e) {
+      if (request === playRequest) { stopPlay(); toast('Mixen mislukt: ' + e.message, 'err'); }
+      return;
+    }
+    if (destroyed || request !== playRequest) return;
     if (playhead >= contentEnd() - 0.05) playhead = 0;
     await player.play(playhead).catch(() => {});
+    if (destroyed || request !== playRequest) { player.pause(); return; }
+    startingPlayback = false;
+    playBtn.removeAttribute('aria-busy');
     playBtn.replaceChildren(icon('pause'));
     playBtn.title = 'Pauzeren (spatie)';
     cancelAnimationFrame(raf);
@@ -842,8 +869,8 @@ export async function mount(root, { id }) {
     };
     raf = requestAnimationFrame(loop);
   }
-  function stopPlay() { player.pause(); cancelAnimationFrame(raf); playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; updateEditorGlitchState(); }
-  function togglePlay() { player.playing ? stopPlay() : startPlay(); }
+  function stopPlay() { playRequest++; startingPlayback = false; playBtn.removeAttribute('aria-busy'); player.pause(); cancelAnimationFrame(raf); playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; updateEditorGlitchState(); }
+  function togglePlay() { player.playing || startingPlayback ? stopPlay() : startPlay(); }
 
   // ============ media panel ============
   let mediaTab = 'audio';
@@ -1987,7 +2014,7 @@ export async function mount(root, { id }) {
     const paintChoices = () => {
       const scrollTop = choices.scrollTop;
       choices.replaceChildren();
-      const matching = VOICE_PRESETS.filter((p) => (category === 'Alles' || (category === 'Populair' ? p.popular : p.group === category)) && `${p.name} ${p.group} ${p.desc}`.toLowerCase().includes(query.toLowerCase().trim())).sort((a, b) => groupNames.indexOf(a.group) - groupNames.indexOf(b.group));
+      const matching = VOICE_PRESETS.filter((p) => (category === 'Alles' || (category === 'Populair' ? p.popular : p.group === category)) && `${p.name} ${p.group} ${p.desc} ${p.tags || ''}`.toLowerCase().includes(query.toLowerCase().trim())).sort((a, b) => groupNames.indexOf(a.group) - groupNames.indexOf(b.group));
       resultsLabel.textContent = `${matching.length} ${matching.length === 1 ? 'klank' : 'klanken'}${query ? ` voor “${query}”` : ` · ${category}`}`;
       if (!matching.length) choices.append(h('div', { class: 'fx-no-results' }, 'Geen effecten gevonden. Probeer een andere zoekterm.'));
       let lastGroup = null;

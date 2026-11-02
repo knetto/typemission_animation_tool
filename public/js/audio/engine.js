@@ -1,6 +1,7 @@
 // Audio engine: decode sources, process clips (trim/reverse/speed/pitch/voice FX), mix the timeline.
 // Playback uses a plain <audio> element with a rendered WAV — no live AudioContext (Bluetooth-safe).
-import { speedPitch, reverse, peaks } from './dsp.js';
+import { reverse, peaks } from './dsp.js';
+import { runDsp } from './dsp-jobs.js';
 import { applyVoiceFx } from './voicefx.js';
 import { renderBuiltin, SR } from './sfxlib.js';
 import { encodeWav } from '../util.js';
@@ -61,7 +62,7 @@ export class AudioEngine {
         const b = Math.min(src.length, Math.round((c.offset + c.duration * c.speed) * SR));
         let y = src.slice(a, Math.max(a + 1, b));
         if (c.reverse) y = reverse(y);
-        if (c.speed !== 1 || c.pitch !== 0) y = speedPitch(y, c.speed, c.pitch);
+        if (c.speed !== 1 || c.pitch !== 0) y = await runDsp('speedPitch', y, { speed: c.speed, pitch: c.pitch });
         const want = Math.max(1, Math.round(c.duration * SR));
         if (Math.abs(y.length - want) > 1) { const z = new Float32Array(want); z.set(y.subarray(0, want)); y = z; }
         if (c.fx && c.fx !== 'none') y = await applyVoiceFx(y, SR, c.fx, c.fxAmount ?? 1);

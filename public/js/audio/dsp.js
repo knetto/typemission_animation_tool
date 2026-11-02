@@ -153,7 +153,7 @@ export function finishVoice(ref, rendered, maxGain = 4) {
   if (referenceLevel < 1e-7) return new Float32Array(ref.length);
   let gain = voiceLevel > 1e-7 ? Math.min(maxGain, referenceLevel / voiceLevel) : 1;
   let peak = 0;
-  for (const sample of out) peak = Math.max(peak, Math.abs(sample));
+  for (let i = 0; i < out.length; i++) peak = Math.max(peak, Math.abs(out[i]));
   if (peak * gain > 0.96) gain = 0.96 / peak;
   for (let i = 0; i < out.length; i++) out[i] *= gain;
   return out;

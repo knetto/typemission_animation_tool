@@ -1,7 +1,8 @@
 // Voice effect presets — rendered offline (OfflineAudioContext + JS post-processing)
 import { nodes } from './synth.js';
-import { speedPitch, finishVoice, telephoneCodec, rms, bitcrush, dropouts, stutter, concat, rng } from './dsp.js';
-import { vocode, tapeDrift } from './robot.js';
+import { finishVoice, telephoneCodec, rms, bitcrush, dropouts, stutter, concat, rng } from './dsp.js';
+import { tapeDrift } from './robot.js';
+import { runDsp } from './dsp-jobs.js';
 
 // helpers for wet chains
 const bed = (N, out, dur, { type = 'bandpass', f = 2500, q = 0.5, level = 0.02, seed = 3 } = {}) => {
@@ -40,23 +41,29 @@ function communication({ lo = 250, hi = 4500, presence = 1.5, frequency = 1800, 
   };
 }
 
-function metal(N, input, out, { frequency = 75, depth = 0.8, delay = 0.007, feedback = 0.5, drive = 3 } = {}) {
+function metal(N, input, out, { frequency = 75, depth = 0.45, delay = 0.007, feedback = 0.28, drive = 1.5 } = {}) {
   const modulated = N.gain(1);
   ring(N, null, input, modulated, frequency, depth);
   const comb = N.delay(delay, 0.1), fb = N.gain(feedback);
   modulated.connect(comb); N.chain(comb, N.filter('lowpass', 4800), fb, comb);
   const sum = N.gain(1);
   N.chain(modulated, N.gain(0.65), sum); N.chain(comb, N.gain(0.6), sum);
-  N.chain(sum, N.gain(drive), N.shaper(1.8), N.filter('highpass', 75), N.filter('lowpass', 6500), out);
+  const saturation = N.shaper(1.4); saturation.oversample = '4x';
+  N.chain(sum, N.gain(drive), saturation, N.filter('highpass', 75), N.filter('lowpass', 4200), out);
 }
+
+const voiceCore = options => ({
+  pre: (x, sr, amount) => runDsp('vocode', x, { sr, voice: { ...options, amount } }),
+  transformsVoice: true,
+});
 
 function vocoder(options, { color = 0, room = 0, metallic = false } = {}) {
   return {
-    pre: (x, sr) => vocode(x, sr, options), tail: Math.max(0.08, room),
+    ...voiceCore(options), tail: Math.max(0.08, room),
     wet: (N, ctx, src, out) => {
       const voice = N.filter('peaking', 1800, 0.75, color);
       src.connect(voice);
-      if (metallic) metal(N, voice, out, { frequency: 36, depth: 0.35, delay: 0.015, feedback: 0.35, drive: 2 });
+      if (metallic) metal(N, voice, out, { frequency: 36, depth: 0.25, delay: 0.015, feedback: 0.22, drive: 1.3 });
       else voice.connect(out);
       if (room) N.chain(voice, N.delay(0.02), N.reverbIR(room, 3), N.filter('lowpass', 5000), N.gain(0.28), out);
     },
@@ -135,37 +142,46 @@ export const VOICE_PRESETS = [
     ...communication({ lo: 100, hi: 11000, presence: 0.5, ratio: 1.5 }) },
 
   // ---------- Robot ----------
-  { id: 'vintage_robot', name: 'Robot · bunker / analoog', group: 'Robot', emoji: '⚙️', desc: 'Oude bunkercomputer: langzame metalen resonanties, buizenvervorming en onvaste band.', popular: true, latency: 0.006, tail: 0.4,
+  { id: 'vintage_robot', name: 'Robot · bunker / analoog', group: 'Robot', emoji: '⚙️', desc: 'Lage, vlakke bunkercomputer met donkere spraakresonanties en analoge kleuring.', popular: true, latency: 0.006, tail: 0.4,
+    ...voiceCore({ frequency: 92, formant: 0.88, warmth: 0.4, cutoff: 4300 }),
     wet: (N, ctx, src, out, a, dur) => {
-      const stages = [N.filter('peaking', 1150, 1.4, 5), N.gain(4), N.shaper(2.6), N.comp(-24, 4.5, 0.006, 0.14)];
+      const stages = [N.filter('peaking', 1150, 1.1, 3), N.gain(1.8), N.shaper(1.6), N.comp(-24, 3, 0.006, 0.14)];
       const filtered = band(N, src, 280, 2800, stages);
       const mid = N.gain(1);
-      ring(N, ctx, filtered, mid, 38, 0.7);
+      ring(N, ctx, filtered, mid, 38, 0.4);
       const comb = N.delay(0.011, 0.1), fb = N.gain(0.42);
       mid.connect(comb); comb.connect(fb); fb.connect(comb);
       const room = N.reverbIR(0.35, 3.5), rg = N.gain(0.18);
       comb.connect(out); mid.connect(out); mid.connect(room); room.connect(rg); rg.connect(out);
       bed(N, out, dur, { f: 1900, q: 0.7, level: 0.0035, seed: 17 });
     },
-    post: (y, sr) => tapeDrift(telephoneCodec(y, sr, { rate: 8000, bits: 6 }), sr, 0.0025) },
-  { id: 'robot', name: 'Robot · metaal', group: 'Robot', emoji: '🤖', desc: 'Duidelijke metalen stem met een brommende ringmodulator en korte resonantie.', popular: true, tail: 0.24,
+    post: (y, sr) => tapeDrift(telephoneCodec(y, sr, { rate: 10000, bits: 8 }), sr, 0.001) },
+  { id: 'robot', name: 'Robot · metaal', group: 'Robot', emoji: '🤖', desc: 'Opnieuw gevormde robotstem met een vaste toon, metalen klinkers en korte resonantie.', popular: true, tail: 0.24,
+    ...voiceCore({ frequency: 118, formant: 0.97, cutoff: 5200 }),
     wet: (N, ctx, src, out) => metal(N, src, out) },
-  { id: 'computer', name: 'Robot · AI / android', group: 'Robot', emoji: '💠', desc: 'Gladde synthetische android: vaste toon, heldere articulatie en een korte futuristische galm.',
-    ...vocoder({ frequency: 145, bands: 28, formant: 1.05, pulse: 0.1, breath: 0.06, articulation: 0.35 }, { room: 0.22, color: 2 }) },
+  { id: 'computer', name: 'Mother · scheepscomputer', group: 'Robot', emoji: '💠', tags: 'AI android moeder mother I Am Mother warm vrouwelijk ruimteschip', popular: true,
+    desc: 'Warme, rustige moederlijke computerstem: licht vrouwelijk, beheerste intonatie en een donkere, kleine ruimtegalm.',
+    ...voiceCore({ frequency: 172, formant: 1.12, intonation: 0.18, warmth: 0.55, cutoff: 5600, grain: 0.0025 }), latency: 0.006, tail: 0.3,
+    wet: (N, ctx, src, out) => {
+      const voice = N.filter('highpass', 75), warmth = N.filter('lowshelf', 230, 0.707, 2.5), presence = N.filter('peaking', 2700, 0.8, 1.2), air = N.filter('highshelf', 4700, 0.707, -2);
+      const compressor = N.comp(-22, 1.8, 0.012, 0.18);
+      N.chain(src, voice, warmth, presence, air, compressor, out);
+      N.chain(compressor, N.delay(0.024), N.reverbIR(0.26, 3.8), N.filter('lowpass', 3200), N.gain(0.1), out);
+    } },
   { id: 'robot_vocoder', name: 'Robot · vocoder', group: 'Robot', emoji: '🎹', desc: 'Klassieke zingende synthesizerstem: je woorden sturen een vaste elektronische toon.', popular: true,
-    ...vocoder({ frequency: 110, bands: 24, pulse: 0.25, breath: 0.06, articulation: 0.16 }, { color: 1.5 }) },
+    ...vocoder({ frequency: 110, formant: 1, cutoff: 5800 }, { color: 1.5 }) },
   { id: 'robot_titan', name: 'Robot · Titan', group: 'Robot', emoji: '🦾', desc: 'Diepe, zware gevechtsrobot met een lage synthstem, donkere klinkers en metalen pantser.', popular: true,
-    ...vocoder({ frequency: 62, bands: 22, formant: 0.78, pulse: 0.7, breath: 0.04, articulation: 0.22 }, { metallic: true, room: 0.32, color: -2 }) },
+    ...vocoder({ frequency: 64, formant: 0.82, warmth: 0.7, cutoff: 4200 }, { metallic: true, room: 0.32, color: -2 }) },
   { id: 'robot_droid', name: 'Robot · kleine droid', group: 'Robot', emoji: '🛸', desc: 'Hoge, vriendelijke robotstem met heldere klinkers en een licht zwevende elektronische toon.', popular: true,
-    ...vocoder({ frequency: 205, bands: 28, formant: 1.25, pulse: 0.65, breath: 0.1, articulation: 0.3, vibrato: 0.004 }, { room: 0.15, color: 3 }) },
-  { id: 'robot_arcade', name: 'Robot · 8-bit arcade', group: 'Robot', emoji: '👾', desc: 'Bewust hoekige retrospraak: een blokgolfstem met weinig klankbanden en hoorbare digitale stapjes.',
-    ...vocoder({ frequency: 135, bands: 10, pulse: 0.95, breath: 0.02, articulation: 0.12 }, { color: 4 }),
-    post: (y, sr) => telephoneCodec(y, sr, { rate: 9000, bits: 4 }) },
+    ...vocoder({ frequency: 225, formant: 1.22, intonation: 0.08, cutoff: 6200 }, { room: 0.15, color: 2 }) },
+  { id: 'robot_arcade', name: 'Robot · 8-bit arcade', group: 'Robot', emoji: '👾', desc: 'Vlakke retro-computerstem met grove klinkerresonanties en hoorbare digitale stapjes.',
+    ...vocoder({ frequency: 135, formant: 1.05, cutoff: 4700, grain: 0.0013 }, { color: 3 }),
+    post: (y, sr) => telephoneCodec(y, sr, { rate: 11000, bits: 6 }) },
   { id: 'robot_hive', name: 'Robot · collectief', group: 'Robot', emoji: '🔮', desc: 'Meerdere synthetische stemmen in één: een donker, dreigend robotkoor met een ruimtelijke staart.',
-    ...vocoder({ frequency: 95, bands: 24, chord: [0, 7, 12], formant: 0.95, pulse: 0.3, breath: 0.08, articulation: 0.2 }, { room: 0.75, color: 1 }) },
+    ...vocoder({ frequency: 95, chord: [0, 7, 12], formant: 0.95, warmth: 0.2, cutoff: 5300 }, { room: 0.75, color: 1 }) },
   { id: 'robot_glitch', name: 'Robot · defect / glitch', group: 'Robot', emoji: '🔧', desc: 'Een haperende digitale robot die lettergrepen herhaalt en korte signaalfouten maakt.',
-    ...vocoder({ frequency: 165, bands: 18, formant: 1.1, pulse: 0.5, breath: 0.03, articulation: 0.18 }),
-    post: (y, sr) => dropouts(stutter(telephoneCodec(y, sr, { rate: 10000, bits: 5 }), sr, { rate: 4.5, seed: 84 }), sr, { rate: 2, minLen: 0.025, maxLen: 0.065, seed: 85 }) },
+    ...vocoder({ frequency: 155, formant: 1.08, cutoff: 5100 }),
+    post: (y, sr) => dropouts(stutter(telephoneCodec(y, sr, { rate: 11000, bits: 7 }), sr, { rate: 2, seed: 84 }), sr, { rate: 1.2, minLen: 0.02, maxLen: 0.045, seed: 85 }) },
 
   // ---------- Karakter ----------
   { id: 'alien', name: 'Alien', group: 'Karakter', emoji: '👽', desc: 'Buitenaards en zwevend', pitch: 4,
@@ -204,12 +220,12 @@ export async function applyVoiceFx(x, sr, presetId, amount = 1) {
       padded[padding - 1 - i] = y[i % y.length];
       padded[padding + y.length + i] = y[y.length - 1 - i % y.length];
     }
-    const shifted = speedPitch(padded, 1, p.pitch * amount).subarray(padding);
+    const shifted = (await runDsp('speedPitch', padded, { speed: 1, pitch: p.pitch * amount })).subarray(padding);
     y = new Float32Array(x.length);
     y.set(shifted.subarray(0, y.length));
   }
   const reference = y;
-  if (p.pre) y = finishVoice(reference, p.pre(y, sr), 8);
+  if (p.pre) y = finishVoice(reference, await p.pre(y, sr, amount), 4);
   if (p.wet) {
     const tail = p.tail ?? 0.05;
     const latency = Math.round((p.latency || 0) * sr);
@@ -217,7 +233,8 @@ export async function applyVoiceFx(x, sr, presetId, amount = 1) {
     const buf = ctx.createBuffer(1, y.length, sr);
     // Consistent drive/compression for quiet and loud recordings.
     const inputGain = Math.min(12, 0.1 / Math.max(1e-7, rms(y)));
-    buf.copyToChannel(Float32Array.from(y, sample => sample * inputGain), 0);
+    const channel = buf.getChannelData(0);
+    for (let i = 0; i < y.length; i++) channel[i] = y[i] * inputGain;
     const src = ctx.createBufferSource(); src.buffer = buf;
     const N = nodes(ctx);
     N.voiceActivity = [];
@@ -234,7 +251,10 @@ export async function applyVoiceFx(x, sr, presetId, amount = 1) {
     // Process only the effect signal before mixing. Even glitch presets respect
     // the original voice at low strength, and 0% remains an exact bypass.
     y = new Float32Array(Math.max(reference.length, wet.length));
-    for (let i = 0; i < y.length; i++) y[i] = (reference[i] || 0) * (p.keepDry ? 1 : 1 - amount) + (wet[i] || 0) * amount;
+    // The model morphs voiced pitch and vocal-tract shape. Above half strength
+    // its rebuilt voice replaces the original; consonants remain in the model.
+    const wetAmount = p.transformsVoice ? Math.min(1, amount * 2) : amount * (1 - (p.speechMix || 0));
+    for (let i = 0; i < y.length; i++) y[i] = (reference[i] || 0) * (p.keepDry ? 1 : 1 - wetAmount) + (wet[i] || 0) * wetAmount;
   }
   else {
     if (p.post) y = p.post(y, sr, amount);
