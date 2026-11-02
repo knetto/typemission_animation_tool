@@ -160,13 +160,32 @@ export const VOICE_PRESETS = [
     ...voiceCore({ frequency: 118, formant: 0.97, cutoff: 5200 }),
     wet: (N, ctx, src, out) => metal(N, src, out) },
   { id: 'computer', name: 'Mother · scheepscomputer', group: 'Robot', emoji: '💠', tags: 'AI android moeder mother I Am Mother warm vrouwelijk ruimteschip', popular: true,
-    desc: 'Warme, rustige moederlijke computerstem: licht vrouwelijk, beheerste intonatie en een donkere, kleine ruimtegalm.',
-    ...voiceCore({ frequency: 172, formant: 1.12, intonation: 0.18, warmth: 0.55, cutoff: 5600, grain: 0.0025 }), latency: 0.006, tail: 0.3,
-    wet: (N, ctx, src, out) => {
+    desc: 'Je eigen toonhoogte en intonatie, met een zachte vrouwelijke robotkleur, korte blikkerige galm en heel subtiel gekraak tijdens het spreken.',
+    ...voiceCore({ preservePitch: true, formant: 1.035, robotic: 0.08, warmth: 0.18, grain: 0.0025 }), latency: 0.006, tail: 0.48,
+    wet: (N, ctx, src, out, a, dur) => {
       const voice = N.filter('highpass', 75), warmth = N.filter('lowshelf', 230, 0.707, 2.5), presence = N.filter('peaking', 2700, 0.8, 1.2), air = N.filter('highshelf', 4700, 0.707, -2);
       const compressor = N.comp(-22, 1.8, 0.012, 0.18);
       N.chain(src, voice, warmth, presence, air, compressor, out);
-      N.chain(compressor, N.delay(0.024), N.reverbIR(0.26, 3.8), N.filter('lowpass', 3200), N.gain(0.1), out);
+      // Parallel, damped shell resonances give the voice a small metal body.
+      // The unmodulated speech path stays intact; there is no pitch carrier.
+      for (const [time, feedback, level] of [[0.0078, 0.38, 0.17], [0.0123, 0.29, 0.1]]) {
+        const shell = N.delay(time, 0.1), damping = N.filter('lowpass', 3500), returnGain = N.gain(feedback);
+        N.chain(compressor, N.filter('highpass', 420), shell, damping, returnGain, shell);
+        N.chain(damping, N.filter('peaking', 1250, 1.5, 2), N.gain(level), out);
+      }
+      N.chain(compressor, N.delay(0.021), N.reverbIR(0.4, 3.4), N.filter('highpass', 300), N.filter('lowpass', 3800), N.gain(0.24), out);
+      // Sparse, softly edged crackles follow speech activity, rather than
+      // introducing a continuous hiss or clicks through silent pauses.
+      const random = rng(193), texture = N.noise(dur + 0.04, 194), textureGain = N.gain(0);
+      const textureLevel = 0.0022 * Math.min(1, rms(src.buffer.getChannelData(0)) / 0.1);
+      for (const [time, activity] of N.voiceActivity || []) {
+        if (activity < 0.25 || random() > 0.085) continue;
+        textureGain.gain.setTargetAtTime(textureLevel * activity, time + 0.006, 0.001);
+        textureGain.gain.setTargetAtTime(0, time + 0.01 + random() * 0.006, 0.002);
+      }
+      textureGain.gain.setTargetAtTime(0, dur, 0.002);
+      N.chain(texture, N.filter('highpass', 1100), N.filter('lowpass', 3600), textureGain, out);
+      texture.start(0); texture.stop(dur + 0.04);
     } },
   { id: 'robot_vocoder', name: 'Robot · vocoder', group: 'Robot', emoji: '🎹', desc: 'Klassieke zingende synthesizerstem: je woorden sturen een vaste elektronische toon.', popular: true,
     ...vocoder({ frequency: 110, formant: 1, cutoff: 5800 }, { color: 1.5 }) },

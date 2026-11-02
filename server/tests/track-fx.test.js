@@ -30,7 +30,7 @@ test('track FX process the combined audio after clip FX, fades and clip gain', a
   expected.set(wet.map(value => value * track.gain), start);
   const output = await audio.renderMix({ tracks: [track], clips });
   near(output.pcm, expected);
-  near(output.glitchPcm, expected);
+  near(output.glitchPcm, expected.map(Math.abs));
   assert.equal(JSON.stringify({ tracks: [track], clips }), saved, 'FX never overwrite clip settings');
 });
 

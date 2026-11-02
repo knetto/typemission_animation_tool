@@ -38,15 +38,21 @@ test('voice model changes vowel resonances independently of pitch', () => {
   assert.equal(transformed.length, input.length);
 });
 
-test('Mother replaces the voiced source at full strength instead of overlaying the original voice', async () => {
+test('Mother preserves low and high original pitches with a subtle timbre change', async () => {
   const mother = VOICE_PRESETS.find(preset => preset.id === 'computer');
-  const input = Float32Array.from({ length: sr }, (_, i) => 0.07 * (Math.sin(2 * Math.PI * 227 * i / sr) + 0.4 * Math.sin(2 * Math.PI * 454 * i / sr)));
-  const output = await mother.pre(input, sr, 1);
   assert.match(mother.name, /Mother/);
-  assert.ok(energyAt(output, 172) > energyAt(output, 227) * 10, 'the incoming fundamental is replaced by Mother');
-  assert.ok(rms(output) > rms(input) * 0.7);
-  assert.ok(output.every(Number.isFinite));
-  assert.deepEqual(await mother.pre(input, sr, 0), input, 'zero strength preserves the input');
+  for (const frequency of [105, 130, 227]) {
+    const input = Float32Array.from({ length: sr }, (_, i) => 0.07 * (Math.sin(2 * Math.PI * frequency * i / sr) + 0.4 * Math.sin(4 * Math.PI * frequency * i / sr)));
+    const output = await mother.pre(input, sr, 1);
+    assert.ok(energyAt(output, frequency) > energyAt(output, 172) * 30, 'Mother must not lift a low voice to a fixed female pitch');
+    let cross = 0, energy = 0;
+    for (let i = 0; i < input.length; i++) { cross += input[i] * output[i]; energy += input[i] ** 2; }
+    const correlation = cross / (Math.sqrt(energy) * rms(output) * Math.sqrt(output.length));
+    assert.ok(correlation > 0.98, 'the original voice remains recognizable at full strength');
+    assert.notDeepEqual(output, input, 'the timbre still changes');
+    assert.ok(output.every(Number.isFinite));
+    assert.deepEqual(await mother.pre(input, sr, 0), input, 'zero strength preserves the input');
+  }
 });
 
 test('unvoiced consonants keep their waveform instead of acquiring a synth buzz', () => {

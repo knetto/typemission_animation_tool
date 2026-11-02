@@ -758,7 +758,7 @@ export function createScene(canvas, { mode = 'transmission', opts = {}, voice = 
     if (!glitchPcm?.length || t < s.tAudio || t > s.tAudioEnd) return 0;
     const m = measureAudio(glitchPcm, SR, t - s.tAudio, 0.045);
     if (!m.live || m.peak < 0.004) return 0;
-    return clamp01(Math.max(0.28, m.rms * 3.2, m.peak * 1.15));
+    return clamp01(Math.max(m.rms * 3.2, m.peak * 1.15));
   }
 
   function noiseLevel(t, s, gl = 0) {

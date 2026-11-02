@@ -3,6 +3,7 @@
 import { reverse, peaks } from './dsp.js';
 import { runDsp } from './dsp-jobs.js';
 import { applyVoiceFx } from './voicefx.js';
+import { applyGlitchRegions, glitchVisualEnvelope } from './glitches.js';
 import { renderBuiltin, SR } from './sfxlib.js';
 import { encodeWav } from '../util.js';
 
@@ -16,6 +17,7 @@ export function defaultTimeline() {
       { id: 't_voice', name: 'Audio 1', kind: 'voice', gain: 1, mute: false, solo: false, glitch: false, fx: 'none', fxAmount: 1 },
     ],
     clips: [],
+    effects: [],
   };
 }
 
@@ -25,10 +27,12 @@ export class AudioEngine {
   constructor(resolveUrl) {
     this.resolveUrl = resolveUrl;          // (src) => url for asset/sfx sources
     this.sources = new Map();              // srcKey -> Promise<Float32Array>
+    this.sourceReady = new Map();          // decoded PCM for source-accurate live trim drawing
     this.durations = new Map();            // srcKey -> seconds
     this.processed = new Map();            // clipKey -> Promise<Float32Array>
     this.processedReady = new Map();       // clipKey -> Float32Array (sync access for drawing)
     this.peakCache = new Map();
+    this.trackRenders = new Map();          // cache voice FX independently of glitch overlays
   }
 
   srcKey(src) { return `${src.type}:${src.id ?? src.key}`; }
@@ -41,6 +45,7 @@ export class AudioEngine {
         if (src.type === 'builtin') pcm = await renderBuiltin(src.key);
         else pcm = await decodeUrl(this.resolveUrl(src));
         this.durations.set(k, pcm.length / SR);
+        this.sourceReady.set(k, pcm);
         return pcm;
       })();
       p.catch(() => this.sources.delete(k));
@@ -58,6 +63,7 @@ export class AudioEngine {
     if (!this.processed.has(key)) {
       const p = (async () => {
         const src = await this.getSource(c.src);
+        this.sourceReady.set(this.srcKey(c.src), src);
         const a = Math.max(0, Math.round(c.offset * SR));
         const b = Math.min(src.length, Math.round((c.offset + c.duration * c.speed) * SR));
         let y = src.slice(a, Math.max(a + 1, b));
@@ -104,30 +110,45 @@ export class AudioEngine {
       if (!entries.length) return null;
       const start = Math.min(...entries.map(entry => entry.start));
       const length = Math.max(...entries.map(entry => entry.start - start + entry.pcm.length));
-      let pcm = new Float32Array(length);
-      for (const { clip, pcm: y, start: clipStart } of entries) {
-        const s0 = clipStart - start;
-        const dlen = Math.round(clip.duration * SR), fi = clip.fadeIn * SR, fo = clip.fadeOut * SR;
-        for (let k = 0; k < y.length; k++) {
-          let env = 1;
-          if (fi > 0 && k < fi) env = k / fi;
-          if (fo > 0) { if (k >= dlen) env = 0; else if (k > dlen - fo) env = Math.min(env, (dlen - k) / fo); }
-          pcm[s0 + k] += y[k] * clip.gain * env;
-        }
+      const cacheKey = JSON.stringify([track.id, track.fx, track.fxAmount, entries.map(({ clip, start }) => [this.clipKey(clip), start, clip.gain, clip.fadeIn, clip.fadeOut])]);
+      if (!this.trackRenders.has(cacheKey)) {
+        const rendering = (async () => {
+          let pcm = new Float32Array(length);
+          for (const { clip, pcm: y, start: clipStart } of entries) {
+            const s0 = clipStart - start;
+            const dlen = Math.round(clip.duration * SR), fi = clip.fadeIn * SR, fo = clip.fadeOut * SR;
+            for (let k = 0; k < y.length; k++) {
+              let env = 1;
+              if (fi > 0 && k < fi) env = k / fi;
+              if (fo > 0) { if (k >= dlen) env = 0; else if (k > dlen - fo) env = Math.min(env, (dlen - k) / fo); }
+              pcm[s0 + k] += y[k] * clip.gain * env;
+            }
+          }
+          if (track.fx && track.fx !== 'none') pcm = await applyVoiceFx(pcm, SR, track.fx, track.fxAmount ?? 1);
+          return pcm;
+        })();
+        this.trackRenders.set(cacheKey, rendering);
+        rendering.catch(() => this.trackRenders.delete(cacheKey));
+        if (this.trackRenders.size > 6) this.trackRenders.delete(this.trackRenders.keys().next().value);
       }
-      if (track.fx && track.fx !== 'none') pcm = await applyVoiceFx(pcm, SR, track.fx, track.fxAmount ?? 1);
-      return { track, start, pcm };
+      const basePcm = await this.trackRenders.get(cacheKey);
+      const effects = (tl.effects || []).filter(effect => effect.trackId === track.id);
+      const pcm = applyGlitchRegions(basePcm, SR, effects, offset + start / SR);
+      const visual = glitchVisualEnvelope(basePcm.length, SR, effects, offset + start / SR);
+      return { track, start, pcm, basePcm, visual };
     }));
     const activeTracks = renderedTracks.filter(Boolean);
     const total = Math.max(1, ...activeTracks.map(({ start, pcm }) => start + pcm.length));
     const mix = new Float32Array(total);
-    const glitchMix = activeTracks.some(({ track }) => track.glitch) ? new Float32Array(total) : null;
-    for (const { track, start, pcm } of activeTracks) {
+    const glitchMix = activeTracks.some(({ track, visual }) => track.glitch || visual) ? new Float32Array(total) : null;
+    for (const { track, start, pcm, basePcm, visual } of activeTracks) {
       const gain = track.gain ?? 1;
       for (let i = 0; i < pcm.length; i++) {
         const value = pcm[i] * gain;
         mix[start + i] += value;
-        if (track.glitch && glitchMix) glitchMix[start + i] += value;
+        // Merge visual triggers once. Read the pre-glitch voice for overlays so
+        // an intentional audio dropout can still produce a screen glitch.
+        if (glitchMix) glitchMix[start + i] = Math.max(glitchMix[start + i], track.glitch ? Math.abs(value) : 0, visual ? Math.abs(basePcm[i] * gain) * visual[i] : 0);
       }
     }
     let peak = 0;
@@ -136,7 +157,6 @@ export class AudioEngine {
       const s = 0.98 / peak;
       for (let i = 0; i < mix.length; i++) {
         mix[i] *= s;
-        if (glitchMix) glitchMix[i] *= s;
       }
     }
     return { pcm: mix, glitchPcm: glitchMix, duration: mix.length / SR, offset };

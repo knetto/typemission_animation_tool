@@ -75,7 +75,7 @@ function addHarmonic(real, imaginary, bin, phase, amplitude) {
   }
 }
 
-export function resynthesizeVoice(input, sr, { frequency = 110, formant = 1, chord = [0], intonation = 0, warmth = 0, cutoff = 5800, amount = 1, grain = 0.0022 } = {}) {
+export function resynthesizeVoice(input, sr, { frequency = 110, formant = 1, chord = [0], intonation = 0, warmth = 0, cutoff = 5800, amount = 1, grain = 0.0022, preservePitch = false, robotic = 0 } = {}) {
   const output = new Float32Array(input.length);
   if (!input.length) return output;
   let totalEnergy = 0;
@@ -117,7 +117,7 @@ export function resynthesizeVoice(input, sr, { frequency = 110, formant = 1, cho
     const fricative = clamp((crossings / Math.max(1, validSamples) - 0.12) / 0.08, 0, 1);
     const targetVoicing = clamp((0.35 - flatness) / 0.28, 0, 1) * (1 - fricative);
     voiced += (targetVoicing - voiced) * (targetVoicing < voiced ? 0.8 : 0.65);
-    if ((intonation || amount < 1) && frameIndex % 4 === 0 && targetVoicing > 0.6) {
+    if (!preservePitch && (intonation || amount < 1) && frameIndex % 4 === 0 && targetVoicing > 0.6) {
       const estimated = estimatePitch(input, start, size, sr);
       if (estimated) { incomingPitch = estimated; pitchBaseline = pitchBaseline ? pitchBaseline * 0.98 + estimated * 0.02 : estimated; }
     }
@@ -135,6 +135,30 @@ export function resynthesizeVoice(input, sr, { frequency = 110, formant = 1, cho
     }
     fft(envelope, cepstralImaginary);
     const tract = 1 + (formant - 1) * amount;
+    if (preservePitch) {
+      // Mother keeps the original harmonic frequencies, phases and prosody.
+      // Only reshape the vocal-tract envelope: a small feminine coloration
+      // and gentle spectral flattening, without imposing a higher synth pitch.
+      let meanEnvelope = 0, envelopeCount = 0;
+      for (let k = 1; k < half; k++) if (k * binHz >= 200 && k * binHz <= 3500) { meanEnvelope += envelope[k]; envelopeCount++; }
+      meanEnvelope /= Math.max(1, envelopeCount);
+      for (let k = 0; k < size; k++) {
+        const mirror = Math.min(k, size - k), f = mirror * binHz;
+        const position = clamp(mirror / tract, 0, half - 1), at = Math.floor(position), fraction = position - at;
+        const shifted = envelope[at] * (1 - fraction) + envelope[Math.min(half, at + 1)] * fraction;
+        const voicedWeight = voiced * clamp((6500 - f) / 2500, 0, 1);
+        const color = shifted - envelope[mirror] - robotic * amount * (envelope[mirror] - meanEnvelope);
+        const tilt = -warmth * amount * 0.5 * Math.log1p((f / 3000) ** 2);
+        const gain = Math.exp(clamp((color + tilt) * voicedWeight, -0.2, 0.25));
+        synthReal[k] = real[k] * gain; synthImaginary[k] = imaginary[k] * gain;
+      }
+      fft(synthReal, synthImaginary, true);
+      for (let i = Math.max(0, -start); i < size && start + i < input.length; i++) {
+        output[start + i] += synthReal[i] * window[i];
+        normalization[start + i] += window[i] ** 2;
+      }
+      continue;
+    }
     for (const note of chord) {
       const f0 = currentPitch * 2 ** (note / 12);
       for (let harmonic = 1; harmonic * f0 < maxFrequency; harmonic++) {

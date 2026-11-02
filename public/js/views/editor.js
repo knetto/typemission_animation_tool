@@ -5,6 +5,9 @@ import { AudioEngine, Player, SR, defaultTimeline, clipDefaults } from '../audio
 import { VOICE_PRESETS } from '../audio/voicefx.js';
 import { BUILTIN_SFX, renderBuiltin } from '../audio/sfxlib.js';
 import { detectVoiced } from '../audio/dsp.js';
+import { GLITCH_PRESETS, GLITCH_BY_ID, glitchDefaults, glitchWindows, isDynamicGlitch } from '../audio/glitches.js';
+import { waveformPeaks, sourceSampleRange, processedTrimRange } from '../audio/waveform.js';
+import { ScrubPlayer } from '../audio/scrub.js';
 import { previewAudio, createWaveBox } from '../preview.js';
 import { sfxStore, sfxId } from '../audio/sfxstore.js';
 import { createSfxFolders } from '../audio/sfxui.js';
@@ -33,13 +36,16 @@ export async function mount(root, { id }) {
   let tl = normalize(project.timeline);
   const engine = new AudioEngine(resolveUrl);
   const player = new Player();
+  const scrubPlayer = new ScrubPlayer(SR);
 
   let selected = new Set(), playhead = 0, snap = true, raf = 0, mixPcm = null, mixDirty = true, destroyed = false;
   let mixRender = null, mixRevision = 0, playRequest = 0, startingPlayback = false;
+  let waveFrame = 0, mixWarmupTimer = null, activeScrub = null;
   const undo = [], redo = [];
   let clipboard = [], contextMenu = null, menuReturnFocus = null;
   let fxPopup = null, fxTrigger = null;
   let fxPreviewToken = 0, fxPreviewButton = null;
+  let selectedEffectId = null, rangeSelection = null, rangeMode = false, effectClipboard = null;
   const openSections = new Set();
 
   function resolveUrl(src) {
@@ -51,6 +57,7 @@ export async function mount(root, { id }) {
   const trackOf = (c) => tl.tracks.find((t) => t.id === c.trackId);
   const contentEnd = () => tl.clips.reduce((m, c) => Math.max(m, c.start + c.duration), 0);
   const sel = () => tl.clips.filter((c) => selected.has(c.id));
+  const selectedEffect = () => tl.effects.find(effect => effect.id === selectedEffectId);
 
   // ============ layout ============
   const titleIn = h('input', { class: 'ed-title', id: 'project-title', value: project.name, spellcheck: 'false', 'aria-label': 'Projectnaam' });
@@ -83,13 +90,14 @@ export async function mount(root, { id }) {
   const redoBtn = h('button', { class: 'btn btn-icon btn-ghost', id: 'redo-btn', title: 'Opnieuw (Ctrl+Shift+Z)', onclick: () => doRedo() }, icon('redo'));
   const snapBtn = h('button', { class: 'btn btn-sm active', id: 'snap-btn', title: 'Lijn blokken automatisch op elkaar uit', 'aria-pressed': 'true', onclick: () => { snap = !snap; snapBtn.classList.toggle('active', snap); snapBtn.setAttribute('aria-pressed', String(snap)); } }, icon('magnet'), 'Uitlijnen');
   const zoomIn = h('input', { type: 'range', min: 20, max: 300, step: 1, value: tl.zoom, id: 'zoom-range', title: 'Zoom' });
+  const rangeBtn = h('button', { class: 'btn btn-sm', id: 'range-select-btn', title: 'Sleep een bereik op een spoor om daar een glitch toe te voegen (R)', 'aria-pressed': 'false', onclick: () => setRangeMode(!rangeMode) }, '↔ Bereik');
   const transport = h('div', { class: 'transport' },
     playBtn,
     h('button', { class: 'btn btn-icon btn-ghost', title: 'Naar begin (Home)', id: 'stop-btn', onclick: () => { stopPlay(); setPlayhead(0); } }, icon('stop')),
     h('div', { class: 'sep' }), undoBtn, redoBtn, h('div', { class: 'sep' }),
     h('button', { class: 'btn btn-sm', id: 'split-btn', title: 'Splitsen bij afspeelkop (S)', onclick: () => splitAtPlayhead() }, icon('split'), 'Splitsen'),
     h('button', { class: 'btn btn-sm', id: 'delete-btn', title: 'Verwijderen (Delete)', onclick: () => deleteSelected() }, icon('trash'), 'Verwijderen'),
-    h('div', { class: 'sep' }), snapBtn,
+    h('div', { class: 'sep' }), rangeBtn, snapBtn,
     h('div', { class: 'zoom-ctl' },
       h('button', { class: 'btn btn-icon btn-sm btn-ghost', title: 'Uitzoomen', onclick: () => setZoom(tl.zoom / 1.3) }, icon('zoomout')), zoomIn,
       h('button', { class: 'btn btn-icon btn-sm btn-ghost', title: 'Inzoomen', onclick: () => setZoom(tl.zoom * 1.3) }, icon('zoomin'))));
@@ -101,7 +109,7 @@ export async function mount(root, { id }) {
   const rulerCv = h('canvas', { height: 30 });
   const ruler = h('div', { class: 'ruler', id: 'ruler' }, rulerCv);
   const lanes = h('div', { class: 'lanes' });
-  const playheadEl = h('div', { class: 'playhead' });
+  const playheadEl = h('div', { class: 'playhead', tabindex: '0', role: 'slider', 'aria-label': 'Afspeelkop · sleep om audio te scrubben', 'aria-valuemin': '0', 'aria-valuenow': '0', 'aria-valuemax': '0', title: 'Sleep om de audio op deze plek te horen' });
   const snapLine = h('div', { class: 'snap-line' });
   const emptyHint = h('div', { class: 'tl-empty' }, h('div', { class: 'empty-audio-icon' }, icon('wave')), h('b', {}, 'Hier begint je audio'), h('p', {}, 'Upload een bestand, neem iets op of sleep audio naar het spoor.'), h('button', { class: 'btn btn-primary', onclick: () => fileIn.click() }, icon('plus'), 'Audio toevoegen'));
   const tlCanvas = h('div', { class: 'tl-canvas' }, ruler, lanes, playheadEl, snapLine);
@@ -131,18 +139,22 @@ export async function mount(root, { id }) {
   titleIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') titleIn.blur(); });
 
   // ============ history ============
-  const snapshot = () => JSON.stringify({ tracks: tl.tracks, clips: tl.clips, selected: [...selected] });
-  const restore = (s) => { const o = JSON.parse(s); tl.tracks = o.tracks; tl.clips = o.clips; selected = new Set(o.selected || []); };
+  const snapshot = () => JSON.stringify({ tracks: tl.tracks, clips: tl.clips, effects: tl.effects, selected: [...selected], selectedEffectId });
+  const restore = (s) => { const o = JSON.parse(s); tl.tracks = o.tracks; tl.clips = o.clips; tl.effects = o.effects || []; selected = new Set(o.selected || []); selectedEffectId = o.selectedEffectId || null; rangeSelection = null; };
   function pushUndo(before) { undo.push(before); if (undo.length > 150) undo.shift(); redo.length = 0; }
   function mutate(fn) { const before = snapshot(); fn(); pushUndo(before); changed(); }
   function changed({ inspectorToo = true } = {}) {
     selected = new Set([...selected].filter((cid) => tl.clips.some((c) => c.id === cid)));
+    if (!selectedEffect()) selectedEffectId = null;
+    if (rangeSelection && !tl.tracks.some(track => track.id === rangeSelection.trackId)) rangeSelection = null;
     mixDirty = true;
     mixRevision++;
+    endScrub(false);
     if (player.playing || startingPlayback) stopPlay();
     renderTimeline();
     if (inspectorToo) renderInspector();
     markDirty();
+    scheduleMixWarmup();
     undoBtn.disabled = !undo.length; redoBtn.disabled = !redo.length;
   }
   function doUndo() { if (!undo.length) return; redo.push(snapshot()); restore(undo.pop()); changed(); toast('Ongedaan gemaakt', 'info', 1200); }
@@ -223,11 +235,14 @@ export async function mount(root, { id }) {
   }
 
   function deleteSelected() {
+    if (selectedEffect()) { mutate(() => { tl.effects = tl.effects.filter(effect => effect.id !== selectedEffectId); selectedEffectId = null; }); return; }
     if (!selected.size) return;
     mutate(() => { tl.clips = tl.clips.filter((c) => !selected.has(c.id)); selected.clear(); });
   }
 
   function duplicateSelected() {
+    const effect = selectedEffect();
+    if (effect) { mutate(() => { const copy = { ...effect, id: uid(), start: effect.start + effect.duration }; tl.effects.push(copy); selectedEffectId = copy.id; }); return; }
     const list = sel(); if (!list.length) return;
     const span = Math.max(...list.map((c) => c.start + c.duration)) - Math.min(...list.map((c) => c.start));
     mutate(() => {
@@ -237,13 +252,19 @@ export async function mount(root, { id }) {
   }
 
   function copySelected(cut = false) {
+    if (selectedEffect()) { effectClipboard = structuredClone(selectedEffect()); clipboard = []; if (cut) deleteSelected(); toast('Glitch gekopieerd — plak op de afspeelkop', 'info'); return; }
     if (!selected.size) return;
+    effectClipboard = null;
     clipboard = structuredClone(sel());
     if (cut) deleteSelected();
     toast(`${clipboard.length} clip(s) ${cut ? 'geknipt' : 'gekopieerd'} — plak op de afspeelkop`, 'info', 1800);
   }
 
   function pasteClips(trackId = null, time = playhead) {
+    if (effectClipboard) {
+      mutate(() => { const copy = { ...effectClipboard, id: uid(), start: Math.max(0, time), trackId: trackId || (tl.tracks.some(track => track.id === effectClipboard.trackId) ? effectClipboard.trackId : tl.tracks[0].id) }; tl.effects.push(copy); selected.clear(); selectedEffectId = copy.id; rangeSelection = null; });
+      return;
+    }
     if (!clipboard.length) return;
     const start = Math.min(...clipboard.map((c) => c.start));
     const firstTrack = tl.tracks.findIndex((t) => t.id === clipboard[0].trackId);
@@ -308,6 +329,7 @@ export async function mount(root, { id }) {
   scroller.addEventListener('scroll', () => closeContextMenu());
 
   function clipContext(e, c) {
+    selectedEffectId = null; rangeSelection = null;
     if (!selected.has(c.id)) selected = new Set([c.id]);
     setPlayhead(xToTime(e.clientX)); renderTimeline(); renderInspector();
     openContextMenu(e, clipActions(c), selected.size > 1 ? `${selected.size} clips geselecteerd` : c.name);
@@ -316,6 +338,7 @@ export async function mount(root, { id }) {
   function clipActions(c) {
     return [
       { label: 'Clip aanpassen', icon: 'edit', action: () => { inspector.querySelector('input')?.focus(); } },
+      { label: 'Bereik selecteren voor glitch', action: () => setRangeMode(true) },
       { label: 'Hernoemen', action: () => renameClip(c), disabled: selected.size > 1 },
       null,
       { label: 'Knippen', icon: 'split', key: 'Ctrl+X', action: () => copySelected(true) },
@@ -331,6 +354,7 @@ export async function mount(root, { id }) {
   function timelineContext(e, t) {
     const time = xToTime(e.clientX); setPlayhead(time);
     openContextMenu(e, [
+      { label: 'Bereik selecteren voor glitch', action: () => setRangeMode(true) },
       { label: 'Plakken op deze plek', icon: 'copy', key: 'Ctrl+V', disabled: !clipboard.length, action: () => pasteClips(t.id, time) },
       { label: 'Alles selecteren', icon: 'wave', key: 'Ctrl+A', disabled: !tl.clips.length, action: () => { selected = new Set(tl.clips.map((c) => c.id)); renderTimeline(); renderInspector(); } },
       null, { label: 'Spoor toevoegen', icon: 'plus', action: addTrack },
@@ -375,7 +399,7 @@ export async function mount(root, { id }) {
       const sameTrack = list.every((clip) => clip.trackId === list[0].trackId);
       // Keep a single track's FX editable; bake separate tracks into a fresh
       // neutral track so the destination cannot apply an effect twice.
-      const flat = { ...tl, tracks: tl.tracks.map((t) => ({ ...t, ...(sameTrack ? { gain: 1, fx: 'none' } : {}), mute: false, solo: false })) };
+      const flat = { ...tl, ...(sameTrack ? { effects: [] } : {}), tracks: tl.tracks.map((t) => ({ ...t, ...(sameTrack ? { gain: 1, fx: 'none' } : {}), mute: false, solo: false })) };
       const { pcm, offset } = await engine.renderMix(flat, { clipIds: list.map((c) => c.id), ignoreMute: true });
       const file = new File([encodeWav(pcm, SR)], 'samengevoegd.wav', { type: 'audio/wav' });
       const name = list.length === 1 ? `${list[0].name} (bewerkt)` : `Samengevoegd (${list.length} clips)`;
@@ -397,6 +421,123 @@ export async function mount(root, { id }) {
   function busy(msg) { busyCount++; busyEl.lastChild.textContent = msg; tlWrap.append(busyEl); return () => { if (--busyCount <= 0) { busyCount = 0; busyEl.remove(); } }; }
 
   // ============ timeline rendering ============
+  function setRangeMode(value) {
+    rangeMode = value;
+    rangeBtn.classList.toggle('active', value);
+    rangeBtn.setAttribute('aria-pressed', String(value));
+    tlWrap.classList.toggle('range-select-mode', value);
+    if (value) mediaTab = 'glitches';
+    if (mediaTab === 'glitches') renderMedia();
+    renderInspector();
+  }
+
+  function addGlitch(type, trackId = null, start = null, duration = null) {
+    if (!GLITCH_BY_ID[type]) return;
+    const range = rangeSelection;
+    const clip = sel()[0];
+    const effect = { ...glitchDefaults(), id: uid(), type,
+      trackId: trackId || range?.trackId || clip?.trackId || tl.tracks[0].id,
+      start: Math.max(0, start ?? range?.start ?? playhead),
+      duration: Math.max(0.04, duration ?? range?.duration ?? 0.8) };
+    mutate(() => { tl.effects.push(effect); selected.clear(); selectedEffectId = effect.id; rangeSelection = null; });
+    setRangeMode(false);
+  }
+
+  function glitchChoice(preset) {
+    const choice = h('button', { class: 'glitch-choice', type: 'button', draggable: 'true', 'data-glitch-type': preset.id, style: { '--gc': preset.color }, onclick: () => addGlitch(preset.id) },
+      h('span', { class: 'glitch-symbol', 'aria-hidden': 'true' }, preset.icon),
+      h('span', { class: 'glitch-choice-copy' }, h('b', {}, preset.name), h('span', {}, preset.desc)), h('span', { 'aria-hidden': 'true' }, '+'));
+    choice.addEventListener('dragstart', event => { event.dataTransfer.setData('application/x-tglitch', preset.id); event.dataTransfer.effectAllowed = 'copy'; });
+    return choice;
+  }
+
+  function rangeEl(range) {
+    return h('div', { class: 'timeline-range', style: { left: range.start * tl.zoom + 'px', width: Math.max(2, range.duration * tl.zoom) + 'px' } }, h('span', {}, `${range.duration.toFixed(2)}s geselecteerd`));
+  }
+
+  function startRangeSelection(event, track, lane) {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    if (player.playing || startingPlayback) stopPlay();
+    selected.clear(); selectedEffectId = null;
+    const start = Math.max(0, xToTime(event.clientX)), x0 = event.clientX;
+    rangeSelection = { trackId: track.id, start, duration: 0.04 };
+    lanes.querySelectorAll('.timeline-range').forEach(node => node.remove());
+    const highlight = rangeEl(rangeSelection); lane.append(highlight);
+    lane.setPointerCapture(event.pointerId);
+    const move = e => {
+      const end = Math.max(0, xToTime(e.clientX));
+      rangeSelection.start = Math.min(start, end); rangeSelection.duration = Math.max(0.04, Math.abs(end - start));
+      highlight.style.left = rangeSelection.start * tl.zoom + 'px'; highlight.style.width = rangeSelection.duration * tl.zoom + 'px';
+      highlight.firstChild.textContent = `${rangeSelection.duration.toFixed(2)}s geselecteerd`;
+    };
+    const finish = e => {
+      lane.removeEventListener('pointermove', move); lane.removeEventListener('pointerup', finish); lane.removeEventListener('pointercancel', finish);
+      if (lane.hasPointerCapture(event.pointerId)) lane.releasePointerCapture(event.pointerId);
+      if (e.type === 'pointercancel' || Math.abs(e.clientX - x0) < 4) rangeSelection = null;
+      setPlayhead(rangeSelection?.start ?? start);
+      setRangeMode(false); mediaTab = 'glitches'; renderMedia(); renderTimeline(); renderInspector();
+    };
+    lane.addEventListener('pointermove', move); lane.addEventListener('pointerup', finish); lane.addEventListener('pointercancel', finish);
+  }
+
+  function glitchEl(effect) {
+    const preset = GLITCH_BY_ID[effect.type] || GLITCH_PRESETS[0];
+    const wrap = h('div', { class: `glitch-region${selectedEffectId === effect.id ? ' selected' : ''}${effect.enabled === false ? ' disabled' : ''}`, 'data-effect': effect.id,
+      style: { left: effect.start * tl.zoom + 'px', width: Math.max(8, effect.duration * tl.zoom) + 'px', '--gc': preset.color } },
+      h('div', { class: 'glitch-footprint', 'aria-hidden': 'true' }),
+      h('div', { class: 'glitch-overlay', tabindex: '0', role: 'button', 'aria-pressed': String(selectedEffectId === effect.id), 'aria-label': `${preset.name}, ${effect.duration.toFixed(2)} seconden`, title: `${preset.name} · ${effect.start.toFixed(2)}s – ${(effect.start + effect.duration).toFixed(2)}s\nSleep om te verplaatsen; sleep de randen voor de lengte.` },
+        h('span', { class: 'glitch-handle l', 'aria-hidden': 'true' }), h('span', { class: 'glitch-label' }, `${preset.icon} ${preset.name}`), h('span', { class: 'glitch-handle r', 'aria-hidden': 'true' })));
+    const bar = wrap.querySelector('.glitch-overlay');
+    bar.addEventListener('pointerdown', e => startEffectDrag(e, effect, wrap, bar));
+    bar.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); selected.clear(); selectedEffectId = effect.id; rangeSelection = null; renderTimeline(); renderInspector(); } });
+    bar.addEventListener('contextmenu', e => {
+      selected.clear(); selectedEffectId = effect.id; rangeSelection = null; renderInspector();
+      openContextMenu(e, [ { label: 'Dupliceren', icon: 'copy', key: 'Ctrl+D', action: duplicateSelected }, { label: 'Verwijderen', icon: 'trash', key: 'Delete', danger: true, action: deleteSelected } ], preset.name);
+    });
+    return wrap;
+  }
+
+  function startEffectDrag(event, effect, wrap, bar, dragTarget = event.target) {
+    if (event.button !== 0) return;
+    event.preventDefault(); event.stopPropagation();
+    if (player.playing || startingPlayback) stopPlay();
+    selected.clear(); selectedEffectId = effect.id; rangeSelection = null;
+    lanes.querySelectorAll('.clip.sel, .timeline-range').forEach(node => { node.classList.remove('sel'); if (node.classList.contains('timeline-range')) node.remove(); });
+    lanes.querySelectorAll('.glitch-region').forEach(node => { node.classList.toggle('selected', node === wrap); node.querySelector('.glitch-overlay').setAttribute('aria-pressed', String(node === wrap)); });
+    renderInspector();
+    const before = snapshot(), original = { ...effect }, x0 = event.clientX, laneTop = lanes.getBoundingClientRect().top;
+    const trackIndex = tl.tracks.findIndex(track => track.id === effect.trackId);
+    const mode = dragTarget.classList.contains('glitch-handle') ? (dragTarget.classList.contains('l') ? 'left' : 'right') : 'move';
+    const points = [...snapPoints(), ...tl.effects.filter(item => item !== effect).flatMap(item => [item.start, item.start + item.duration])];
+    let moved = false;
+    bar.setPointerCapture(event.pointerId);
+    const move = e => {
+      const delta = (e.clientX - x0) / tl.zoom;
+      if (!moved && Math.abs(e.clientX - x0) < 3 && Math.abs(e.clientY - event.clientY) < 3) return;
+      moved = true;
+      if (mode === 'left') {
+        const end = original.start + original.duration;
+        effect.start = clamp(snapTime(original.start + delta, null, points), 0, end - 0.04); effect.duration = end - effect.start;
+      } else if (mode === 'right') effect.duration = Math.max(0.04, snapTime(original.start + original.duration + delta, null, points) - original.start);
+      else {
+        effect.start = Math.max(0, snapTime(original.start + delta, null, points));
+        const index = clamp(Math.floor((e.clientY - laneTop) / TRACK_H), 0, tl.tracks.length - 1);
+        effect.trackId = tl.tracks[index].id; wrap.style.transform = `translateY(${(index - trackIndex) * TRACK_H}px)`;
+      }
+      wrap.style.left = effect.start * tl.zoom + 'px'; wrap.style.width = Math.max(8, effect.duration * tl.zoom) + 'px';
+    };
+    const finish = e => {
+      bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', finish); bar.removeEventListener('pointercancel', finish);
+      if (bar.hasPointerCapture(event.pointerId)) bar.releasePointerCapture(event.pointerId);
+      showSnap(null);
+      if (e.type === 'pointercancel') { Object.assign(effect, original); renderTimeline(); renderInspector(); }
+      else if (moved) { pushUndo(before); changed(); }
+      else { renderTimeline(); renderInspector(); }
+    };
+    bar.addEventListener('pointermove', move); bar.addEventListener('pointerup', finish); bar.addEventListener('pointercancel', finish);
+  }
+
   function setZoom(z) {
     const old = tl.zoom, center = (scroller.scrollLeft + scroller.clientWidth / 2) / old;
     tl.zoom = clamp(Math.round(z), 20, 300); zoomIn.value = tl.zoom; fillRange(zoomIn);
@@ -408,7 +549,7 @@ export async function mount(root, { id }) {
 
   const hasTimelineDropPayload = (e) => {
     const types = Array.from(e.dataTransfer?.types || []);
-    return types.includes('application/x-tsrc') || types.includes('Files');
+    return types.includes('application/x-tsrc') || types.includes('application/x-tglitch') || types.includes('Files');
   };
 
   const clearTimelineDropState = () => {
@@ -430,6 +571,12 @@ export async function mount(root, { id }) {
         const d = JSON.parse(e.dataTransfer.getData('application/x-tsrc'));
         addSource(d.src, d.name, trackId, startTime, { createNewTrack });
       } catch {}
+      return;
+    }
+    if (types.includes('application/x-tglitch')) {
+      if (createNewTrack) { toast('Sleep de glitch over een bestaand audiospoor.', 'info'); return; }
+      const type = e.dataTransfer.getData('application/x-tglitch');
+      if (GLITCH_BY_ID[type]) addGlitch(type, trackId, startTime, rangeSelection?.trackId === trackId ? rangeSelection.duration : 0.8);
       return;
     }
     if (e.dataTransfer?.files?.length) {
@@ -493,7 +640,8 @@ export async function mount(root, { id }) {
   });
 
   function renderTimeline() {
-    const width = Math.max(scroller.clientWidth || 800, (contentEnd() + 20) * tl.zoom);
+    const extent = tl.effects.reduce((end, effect) => Math.max(end, effect.start + effect.duration), contentEnd());
+    const width = Math.max(scroller.clientWidth || 800, (extent + 20) * tl.zoom);
     tlCanvas.style.width = width + 'px';
     headsInner.replaceChildren();
     lanes.replaceChildren();
@@ -501,10 +649,11 @@ export async function mount(root, { id }) {
     tl.tracks.forEach((t) => {
       const color = trackColor(t);
       headsInner.append(trackHead(t, color));
-      const lane = h('div', { class: `track-lane${(anySolo ? !t.solo : t.mute) ? ' muted' : ''}${t.glitch ? ' glitch-track' : ''}`, 'data-track': t.id, style: { '--tc': color } });
-      lane.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.target === lane) { selected.clear(); setPlayhead(xToTime(e.clientX)); renderTimeline(); renderInspector(); } });
+      const lane = h('div', { class: `track-lane${(anySolo ? !t.solo : t.mute) ? ' muted' : ''}${t.glitch ? ' glitch-track' : ''}${tl.effects.some(effect => effect.trackId === t.id) ? ' has-glitch-effects' : ''}`, 'data-track': t.id, style: { '--tc': color } });
+      lane.addEventListener('pointerdown', (e) => { if (rangeMode && !e.target.closest('.glitch-overlay')) startRangeSelection(e, t, lane); }, true);
+      lane.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.target === lane) { selected.clear(); selectedEffectId = null; rangeSelection = null; setPlayhead(xToTime(e.clientX)); renderTimeline(); renderInspector(); } });
       lane.addEventListener('contextmenu', (e) => {
-        if (e.target.closest('.clip')) return;
+        if (e.target.closest('.clip, .glitch-overlay')) return;
         timelineContext(e, t);
       });
       lane.addEventListener('dragover', (e) => {
@@ -532,6 +681,8 @@ export async function mount(root, { id }) {
         handleTimelineDrop(e, t.id, dropTime);
       });
       tl.clips.filter((c) => c.trackId === t.id).forEach((c) => lane.append(clipEl(c, color)));
+      tl.effects.filter(effect => effect.trackId === t.id).forEach(effect => lane.append(glitchEl(effect)));
+      if (rangeSelection?.trackId === t.id) lane.append(rangeEl(rangeSelection));
       lanes.append(lane);
     });
     const nextColor = PALETTE[tl.tracks.length % PALETTE.length];
@@ -574,7 +725,7 @@ export async function mount(root, { id }) {
         tl.tracks.length > 1 ? h('button', { class: 'tbtn', title: 'Spoor verwijderen', onclick: async () => {
           const n = tl.clips.filter((c) => c.trackId === t.id).length;
           if (n && !(await modal({ title: `Spoor "${t.name}" verwijderen?`, body: `${n} clip(s) op dit spoor worden ook verwijderd.`, confirm: 'Verwijderen', danger: true }))) return;
-          mutate(() => { tl.tracks = tl.tracks.filter((x) => x !== t); tl.clips = tl.clips.filter((c) => c.trackId !== t.id); });
+          mutate(() => { tl.tracks = tl.tracks.filter((x) => x !== t); tl.clips = tl.clips.filter((c) => c.trackId !== t.id); tl.effects = tl.effects.filter(effect => effect.trackId !== t.id); });
         } }, '×') : null),
       h('button', {
         class: `track-fx-btn${t.fx && t.fx !== 'none' ? ' active' : ''}`, 'data-track-fx': t.id,
@@ -605,26 +756,56 @@ export async function mount(root, { id }) {
       }
     });
     const key = engine.clipKey(c);
-    if (engine.processedReady.has(key)) requestAnimationFrame(() => drawWave(el, c, color));
+    if (engine.processedReady.has(key)) scheduleWaveDraw();
     else {
       el.classList.add('processing');
-      engine.processClip(c).then(() => { el.classList.remove('processing'); if (el.isConnected) drawWave(el, c, color); }).catch(() => { el.classList.remove('processing'); el.style.borderColor = 'var(--danger)'; });
+      engine.processClip(c).then(() => { el.classList.remove('processing'); if (el.isConnected) scheduleWaveDraw(); }).catch(() => { el.classList.remove('processing'); el.style.borderColor = 'var(--danger)'; });
     }
     return el;
   }
 
-  function drawWave(el, c, color) {
-    const cv = el.querySelector('canvas'); if (!cv) return;
-    const w = Math.max(2, Math.min(4096, Math.round(c.duration * tl.zoom))), hh = 60;
-    cv.width = w; cv.height = hh;
-    const pk = engine.clipPeaks(c, Math.max(1, Math.floor(w / 2)));
-    if (!pk) return;
-    const g = cv.getContext('2d'), mid = hh / 2;
-    g.fillStyle = '#e3efff'; g.globalAlpha = 0.78;
-    const gain = c.gain * (trackOf(c)?.gain ?? 1);
-    for (let b = 0; b < pk.length; b++) {
-      const a = Math.max(0.6, Math.min(1, pk[b] * gain) * mid * 0.95);
-      g.fillRect(b * 2, mid - a, 1.4, a * 2);
+  function scheduleWaveDraw() {
+    if (destroyed || waveFrame) return;
+    waveFrame = requestAnimationFrame(() => {
+      waveFrame = 0;
+      const clips = new Map(tl.clips.map(clip => [clip.id, clip]));
+      lanes.querySelectorAll('.clip').forEach(el => { const clip = clips.get(el.dataset.id); if (clip) drawWave(el, clip); });
+    });
+  }
+
+  function drawWave(el, clip) {
+    const canvas = el.querySelector('canvas'); if (!canvas) return;
+    const viewport = scroller.getBoundingClientRect(), rect = el.getBoundingClientRect();
+    if (rect.right < viewport.left || rect.left > viewport.right || rect.bottom < viewport.top || rect.top > viewport.bottom) { canvas.style.display = 'none'; return; }
+    canvas.style.display = '';
+    const dpr = window.devicePixelRatio || 1, border = el.clientLeft;
+    let left = Math.max(0, Math.floor(viewport.left - rect.left - border - 64));
+    const right = Math.min(el.clientWidth, Math.ceil(viewport.right - rect.left - border + 64));
+    left += Math.round((rect.left + border + left) * dpr) / dpr - (rect.left + border + left);
+    const width = Math.max(1, Math.ceil((right - left) * dpr));
+    const height = Math.max(1, Math.round(canvas.getBoundingClientRect().height * dpr));
+    canvas.style.left = left + 'px'; canvas.style.width = width / dpr + 'px';
+    canvas.width = width; canvas.height = height;
+    const reference = el._waveReference || { clip, pcm: engine.processedReady.get(engine.clipKey(clip)) };
+    const source = engine.sourceReady.get(engine.srcKey(clip.src));
+    if (!reference.pcm && !source) return;
+    const processedPeaks = reference.pcm ? waveformPeaks(reference.pcm) : null;
+    const sourcePeaks = source ? waveformPeaks(source) : null;
+    const context = canvas.getContext('2d'), middle = height / 2;
+    context.imageSmoothingEnabled = false; context.fillStyle = '#e3efff'; context.globalAlpha = 0.85;
+    const gain = clip.gain * (trackOf(clip)?.gain ?? 1);
+    for (let x = 0; x < width; x++) {
+      const from = (border + left + x / dpr) / tl.zoom, to = (border + left + (x + 1) / dpr) / tl.zoom;
+      const processedRange = processedTrimRange(clip, reference.clip, from, to, SR);
+      let peak;
+      if (processedPeaks && processedRange[0] >= 0 && processedRange[1] <= reference.clip.duration * SR) peak = processedPeaks.range(...processedRange);
+      else if (sourcePeaks) peak = sourcePeaks.range(...sourceSampleRange(clip, from, to, SR));
+      else peak = { min: 0, max: 0 };
+      const time = (from + to) / 2;
+      const fade = Math.max(0, Math.min(1, clip.fadeIn > 0 ? time / clip.fadeIn : 1, clip.fadeOut > 0 ? (clip.duration - time) / clip.fadeOut : 1));
+      const top = Math.floor(middle - Math.min(1, peak.max * gain * fade) * middle * 0.95);
+      const bottom = Math.ceil(middle - Math.max(-1, peak.min * gain * fade) * middle * 0.95);
+      context.fillRect(x, top, 1, Math.max(1, bottom - top));
     }
   }
 
@@ -648,7 +829,7 @@ export async function mount(root, { id }) {
     if (ex > 0 && ex < w) { g.fillStyle = 'rgba(139,92,246,0.8)'; g.fillRect(ex, 0, 2, 30); }
   }
 
-  scroller.addEventListener('scroll', () => { headsInner.style.transform = `translateY(${-scroller.scrollTop}px)`; drawRuler(); });
+  scroller.addEventListener('scroll', () => { headsInner.style.transform = `translateY(${-scroller.scrollTop}px)`; drawRuler(); scheduleWaveDraw(); });
   scroller.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
@@ -660,16 +841,9 @@ export async function mount(root, { id }) {
 
   const xToTime = (clientX) => Math.max(0, (clientX - lanes.getBoundingClientRect().left) / tl.zoom);
 
-  // ruler scrubbing
-  ruler.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    ruler.setPointerCapture(e.pointerId);
-    const wasPlaying = player.playing; if (wasPlaying) player.pause();
-    const move = (ev) => setPlayhead(xToTime(ev.clientX));
-    move(e);
-    const up = () => { ruler.removeEventListener('pointermove', move); ruler.removeEventListener('pointerup', up); if (wasPlaying) startPlay(); };
-    ruler.addEventListener('pointermove', move); ruler.addEventListener('pointerup', up);
-  });
+  // Both the ruler and the full playhead hit area support audible scrubbing.
+  ruler.addEventListener('pointerdown', startScrub);
+  playheadEl.addEventListener('pointerdown', startScrub);
 
   // ============ snapping ============
   function snapPoints(exclude) {
@@ -687,10 +861,11 @@ export async function mount(root, { id }) {
   function showSnap(t) { snapLine.style.display = t === null ? 'none' : 'block'; if (t !== null) snapLine.style.left = t * tl.zoom + 'px'; }
 
   // ============ drag: move / trim ============
-  function startDrag(e, c, el) {
+  function startDrag(e, c, el, dragTarget = e.target) {
     if (e.button !== 0) return;
+    selectedEffectId = null; rangeSelection = null;
     e.preventDefault(); e.stopPropagation();
-    const mode = e.target.classList.contains('handle') ? (e.target.classList.contains('l') ? 'trimL' : 'trimR') : 'move';
+    const mode = dragTarget.classList.contains('handle') ? (dragTarget.classList.contains('l') ? 'trimL' : 'trimR') : 'move';
     if (e.shiftKey || e.ctrlKey || e.metaKey) { selected.has(c.id) ? selected.delete(c.id) : selected.add(c.id); }
     else if (!selected.has(c.id) || mode !== 'move') selected = new Set([c.id]);
     lanes.querySelectorAll('.clip').forEach((n) => { n.classList.toggle('sel', selected.has(n.dataset.id)); n.setAttribute('aria-pressed', String(selected.has(n.dataset.id))); });
@@ -700,6 +875,7 @@ export async function mount(root, { id }) {
     const before = snapshot(), x0 = e.clientX, y0 = e.clientY;
     const group = mode === 'move' ? sel() : [c];
     const orig = new Map(group.map((g) => [g.id, { ...g }]));
+    if (mode !== 'move') el._waveReference = { clip: { ...c }, pcm: engine.processedReady.get(engine.clipKey(c)) };
     const pts = snapPoints(new Set(group.map((g) => g.id)));
     const minStart = Math.min(...group.map((g) => g.start));
     const laneTop = lanes.getBoundingClientRect().top;
@@ -708,7 +884,7 @@ export async function mount(root, { id }) {
     let moved = false;
     let willCreateTrack = false;
     el.setPointerCapture(e.pointerId);
-    if (mode !== 'move') e.target.classList.add('on');
+    if (mode !== 'move') dragTarget.classList.add('on');
 
     const onMove = (ev) => {
       const dxT = (ev.clientX - x0) / tl.zoom;
@@ -771,10 +947,13 @@ export async function mount(root, { id }) {
         c.fadeOut = Math.min(c.fadeOut, c.duration);
         el.style.width = c.duration * tl.zoom + 'px';
       }
+      scheduleWaveDraw();
     };
     const onUp = () => {
       el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); el.removeEventListener('pointercancel', onUp);
       el.classList.remove('dragging');
+      dragTarget.classList.remove('on');
+      delete el._waveReference;
       clearTimelineDropState();
       if (moved) {
         if (willCreateTrack) {
@@ -804,8 +983,8 @@ export async function mount(root, { id }) {
     tl.tracks.forEach((t, ti) => {
       const active = Boolean(
         player.playing &&
-        t.glitch &&
         (anySolo ? t.solo : !t.mute) &&
+        (t.glitch || tl.effects.some(effect => effect.trackId === t.id && effect.visual !== false && (effect.visualAmount ?? 1) > 0 && glitchWindows(effect).some(window => playhead >= effect.start + window.start && playhead < effect.start + window.end))) &&
         tl.clips.some((c) => c.trackId === t.id && playhead >= c.start && playhead <= c.start + c.duration)
       );
       if (active) anyFiring = true;
@@ -816,14 +995,67 @@ export async function mount(root, { id }) {
   }
   function placePlayhead() {
     playheadEl.style.transform = `translateX(${playhead * tl.zoom}px)`;
+    playheadEl.setAttribute('aria-valuenow', playhead.toFixed(3)); playheadEl.setAttribute('aria-valuemax', String(Math.max(contentEnd(), playhead)));
     bigTime.innerHTML = `${fmtTime(playhead, true)} <small>/ ${fmtTime(contentEnd(), true)}</small>`;
-    $('#split-btn', transport).disabled = !tl.clips.some((c) => (!selected.size || selected.has(c.id)) && playhead - c.start >= 0.02 && c.start + c.duration - playhead >= 0.02);
+    $('#split-btn', transport).disabled = !!selectedEffect() || !tl.clips.some((c) => (!selected.size || selected.has(c.id)) && playhead - c.start >= 0.02 && c.start + c.duration - playhead >= 0.02);
     updateEditorGlitchState();
   }
-  async function ensureMix() {
+  function scheduleMixWarmup() {
+    clearTimeout(mixWarmupTimer);
+    if (destroyed) return;
+    mixWarmupTimer = setTimeout(() => {
+      if (destroyed || !mixDirty || !tl.clips.length || player.playing || activeScrub) return;
+      if (mixRender) { scheduleMixWarmup(); return; }
+      ensureMix({ quiet: true }).catch(() => {});
+    }, 900);
+  }
+
+  function endScrub(resume = false) {
+    const state = activeScrub;
+    if (!state) return;
+    activeScrub = null; state.cleanup(); scrubPlayer.stop();
+    tlWrap.classList.remove('scrubbing'); ruler.removeAttribute('aria-busy');
+    if (resume && state.wasPlaying && !destroyed) startPlay();
+  }
+
+  function startScrub(event) {
+    if (event.button !== 0) return;
+    // A clip edge stays trimmable when it coincides with the playhead.
+    if (event.currentTarget === playheadEl) {
+      const handle = document.elementsFromPoint(event.clientX, event.clientY).find(node => node.matches('.clip .handle, .glitch-handle'));
+      if (handle?.matches('.glitch-handle')) {
+        const wrap = handle.closest('.glitch-region'), effect = tl.effects.find(item => item.id === wrap.dataset.effect);
+        if (effect) { startEffectDrag(event, effect, wrap, handle.closest('.glitch-overlay'), handle); return; }
+      }
+      const clipEl = handle?.closest('.clip'), clip = clipEl && tl.clips.find(item => item.id === clipEl.dataset.id);
+      if (clip) { startDrag(event, clip, clipEl, handle); return; }
+    }
+    event.preventDefault(); event.stopPropagation();
+    const wasPlaying = player.playing || startingPlayback;
+    stopPlay(); previewAudio.stop();
+    const target = event.currentTarget;
+    const state = { wasPlaying, ready: false, cleanup: () => {} }; activeScrub = state;
+    target.setPointerCapture(event.pointerId); tlWrap.classList.add('scrubbing');
+    const move = e => { setPlayhead(xToTime(e.clientX)); if (state.ready) scrubPlayer.seek(playhead); };
+    const finish = e => endScrub(e.type !== 'pointercancel' && e.type !== 'lostpointercapture');
+    state.cleanup = () => {
+      target.removeEventListener('pointermove', move); target.removeEventListener('pointerup', finish); target.removeEventListener('pointercancel', finish); target.removeEventListener('lostpointercapture', finish);
+      if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    };
+    target.addEventListener('pointermove', move); target.addEventListener('pointerup', finish); target.addEventListener('pointercancel', finish); target.addEventListener('lostpointercapture', finish);
+    move(event); ruler.setAttribute('aria-busy', 'true');
+    // Resume in the pointer gesture, before waiting for an uncached mix.
+    const unlocked = scrubPlayer.begin();
+    Promise.all([unlocked, ensureMix({ quiet: true })]).then(([, ready]) => {
+      if (!ready || destroyed || activeScrub !== state) return;
+      scrubPlayer.load(mixPcm); state.ready = true; ruler.removeAttribute('aria-busy'); scrubPlayer.seek(playhead);
+    }).catch(error => { if (activeScrub === state) { endScrub(false); toast(error.message, 'err'); } });
+  }
+
+  async function ensureMix({ quiet = false } = {}) {
     if (!mixDirty && mixPcm) return true;
     if (mixRender?.revision === mixRevision) return mixRender.promise;
-    const revision = mixRevision, done = busy('Audio voorbereiden…');
+    const revision = mixRevision, done = quiet ? () => {} : busy('Audio voorbereiden…');
     const job = { revision, promise: null };
     job.promise = (async () => {
       try {
@@ -837,6 +1069,7 @@ export async function mount(root, { id }) {
     return job.promise;
   }
   async function startPlay() {
+    endScrub(false);
     if (!tl.clips.length) return toast('Voeg eerst audio toe aan de tijdlijn', 'info');
     const request = ++playRequest;
     startingPlayback = true;
@@ -869,12 +1102,12 @@ export async function mount(root, { id }) {
     };
     raf = requestAnimationFrame(loop);
   }
-  function stopPlay() { playRequest++; startingPlayback = false; playBtn.removeAttribute('aria-busy'); player.pause(); cancelAnimationFrame(raf); playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; updateEditorGlitchState(); }
+  function stopPlay() { endScrub(false); playRequest++; startingPlayback = false; playBtn.removeAttribute('aria-busy'); player.pause(); cancelAnimationFrame(raf); playBtn.replaceChildren(icon('play')); playBtn.title = 'Afspelen (spatie)'; updateEditorGlitchState(); }
   function togglePlay() { player.playing || startingPlayback ? stopPlay() : startPlay(); }
 
   // ============ media panel ============
   let mediaTab = 'audio';
-  const mTabs = [['audio', '🎙️ Audio'], ['sfx', '🔊 Effecten']].map(([k, l]) => h('button', { class: 'tab', id: `media-tab-${k}`, onclick: () => { mediaTab = k; renderMedia(); } }, l));
+  const mTabs = [['audio', '🎙️ Audio'], ['sfx', '🔊 Effecten'], ['glitches', 'ϟ Glitches']].map(([k, l]) => h('button', { class: 'tab', id: `media-tab-${k}`, onclick: () => { mediaTab = k; renderMedia(); } }, l));
   mediaTabs.append(...mTabs);
 
   const fileIn = h('input', { type: 'file', accept: 'audio/*,video/webm', multiple: true, hidden: true, id: 'asset-file' });
@@ -1059,6 +1292,11 @@ export async function mount(root, { id }) {
   function renderMedia() {
     mTabs.forEach((b) => b.classList.toggle('active', b.id === `media-tab-${mediaTab}`));
     mediaBody.replaceChildren();
+    if (mediaTab === 'glitches') {
+      mediaBody.append(h('div', { class: 'glitch-library-intro' }, h('h5', {}, 'Glitches op je stem'), h('p', {}, 'Sleep een glitch over je audio. Of selecteer eerst een bereik en klik op een effect.'), h('button', { class: `btn btn-sm${rangeMode ? ' active' : ''}`, id: 'glitch-range-btn', onclick: () => setRangeMode(!rangeMode) }, '↔ Bereik selecteren')),
+        ...GLITCH_PRESETS.map(glitchChoice), h('p', { class: 'hint' }, 'De blokken veranderen alleen het geluid op hetzelfde spoor. Sleep de randen om het moment precies af te bakenen.'));
+      return;
+    }
     if (mediaTab === 'audio') {
       const drop = h('button', { class: 'dropzone', id: 'asset-drop', type: 'button', onclick: () => fileIn.click() }, icon('upload'), h('div', {}, h('b', {}, 'Audio uploaden'), h('br'), h('span', {}, 'Kies bestanden of sleep ze hierheen')));
       ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); drop.classList.add('over'); } }));
@@ -1890,14 +2128,14 @@ export async function mount(root, { id }) {
   // ============ inspector ============
   function fillRange(r) { const p = ((r.value - r.min) / (r.max - r.min)) * 100; r.style.setProperty('--p', p + '%'); }
 
-  function slider({ label, min, max, step, value, fmt, apply }) {
+  function slider({ label, min, max, step, value, fmt, apply, stacked = false }) {
     const r = h('input', { type: 'range', min, max, step, value, 'aria-label': label });
     const out = h('output', {}, fmt(value)); fillRange(r);
     let before = null;
     r.addEventListener('input', () => { before ||= snapshot(); apply(+r.value); out.textContent = fmt(+r.value); fillRange(r); });
     r.addEventListener('change', () => { if (before) pushUndo(before); before = null; changed(); });
     r.addEventListener('dblclick', () => { const def = { Volume: 1, Snelheid: 1, Toonhoogte: 0, 'Fade in': 0, 'Fade out': 0, Intensiteit: 1 }[label]; if (def === undefined) return; before ||= snapshot(); r.value = def; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); });
-    return h('div', { class: 'slider-row', title: 'Dubbelklik = reset' }, h('span', {}, label), r, out);
+    return h('div', { class: `slider-row${stacked ? ' stacked' : ''}`, title: 'Dubbelklik = reset' }, h('span', {}, label), r, out);
   }
 
   function inspectorSection(key, label, ...children) {
@@ -2075,16 +2313,97 @@ export async function mount(root, { id }) {
     search.focus({ preventScroll: true });
   }
 
+  function renderGlitchInspector(effect) {
+    const preset = GLITCH_BY_ID[effect.type] || GLITCH_PRESETS[0];
+    const matchingClip = tl.clips.find(clip => clip.trackId === effect.trackId && clip.start <= effect.start && clip.start + clip.duration > effect.start)
+      || tl.clips.find(clip => clip.trackId === effect.trackId && clip.start < effect.start + effect.duration && clip.start + clip.duration > effect.start);
+    const control = (key, label, min, max, step, fallback, fmt) => slider({ label, min, max, step, value: effect[key] ?? fallback, fmt, apply: value => { effect[key] = value; }, stacked: true });
+    const percent = value => Math.round(value * 100) + '%', ms = value => Math.round(value * 1000) + ' ms';
+    const toggle = (key, label, description) => h('button', {
+      class: `glitch-toggle${effect[key] !== false ? ' on' : ''}`, type: 'button', 'aria-label': label, 'aria-pressed': String(effect[key] !== false),
+      onclick: () => mutate(() => { effect[key] = effect[key] === false; if (key === 'dynamic') effect.dynamicOptIn = true; }),
+    }, h('span', { class: 'glitch-toggle-copy' }, h('b', {}, label), h('span', {}, description)), h('span', { class: 'glitch-switch', 'aria-hidden': 'true' }));
+    const audioControls = h('div', { class: 'glitch-control-group' }, h('h4', {}, 'Klank aanpassen'),
+      control('amount', 'Sterkte glitch', 0, 1, 0.05, 1, percent),
+      ['stutter', 'combined'].includes(effect.type) ? control('grain', 'Herhaalfragment', 0.02, 0.18, 0.005, 0.065, ms) : null,
+      ['hitch', 'combined'].includes(effect.type) ? control('rate', 'Haperingen per seconde', 2, 24, 1, 9, value => `${value}×`) : null,
+      ['hitch', 'combined'].includes(effect.type) ? control('gate', 'Spraak tussen haperingen', 0.1, 0.95, 0.01, 0.58, percent) : null,
+      ['digital', 'combined'].includes(effect.type) ? control('bits', 'Digitale resolutie', 3, 12, 1, 5, value => `${value} bit`) : null,
+      ['digital', 'combined'].includes(effect.type) ? control('sampleRate', 'Digitale samplefrequentie', 2000, 16000, 500, 7000, value => `${(value / 1000).toFixed(1)} kHz`) : null,
+      ['connection', 'combined'].includes(effect.type) ? control('packetLoss', 'Verbindingsuitval', 0, 0.8, 0.05, 0.2, percent) : null,
+      ['connection', 'combined'].includes(effect.type) ? control('packetRepeat', 'Herhaalde audiopakketjes', 0, 0.8, 0.05, 0.15, percent) : null);
+    if (effect.type === 'combined') audioControls.append(h('fieldset', { class: 'glitch-parts' }, h('legend', {}, 'Onderdelen combineren'),
+      ...GLITCH_PRESETS.filter(item => item.id !== 'combined').map(item => h('label', {}, h('input', { type: 'checkbox', checked: effect.parts?.[item.id] !== false, 'aria-label': `Combineer ${item.name}`,
+        onchange: e => mutate(() => { effect.parts = { ...effect.parts, [item.id]: e.target.checked }; }) }), item.name))));
+    const dynamicControls = h('div', { class: 'glitch-control-group' }, h('h4', {}, 'Verdeling over het blok'),
+      toggle('dynamic', 'Dynamische onderbrekingen', effect.dynamic === false ? 'Doorlopend effect over het hele blok.' : 'Korte storingen met schone stukken ertussen.'),
+      effect.dynamic !== false ? h('div', { class: 'glitch-controls' },
+        control('density', 'Hoeveel audio wordt geraakt', 0.05, 0.9, 0.01, 0.32, percent),
+        control('burst', 'Duur per storing', 0.04, 1, 0.02, 0.24, ms),
+        control('variation', 'Variatie in het ritme', 0, 1, 0.05, 0.5, percent),
+        h('button', { class: 'btn btn-sm', id: 'shuffle-glitch-btn', onclick: () => mutate(() => { effect.seed = (effect.seed ?? 0) + 1; }) }, 'Nieuw patroon'),
+        h('p', { class: 'hint' }, 'Verlengen voegt storingen toe op dezelfde schaal. Het herhaalfragment wordt niet uitgerekt.')) : null);
+    const numberField = (key, label, min) => h('label', { class: 'field-label' }, label, h('input', {
+      class: 'input', type: 'number', min, step: 0.01, value: effect[key].toFixed(2), 'aria-label': label,
+      onchange: e => { const value = Number(e.target.value); if (e.target.value !== '' && Number.isFinite(value) && value >= min) mutate(() => { effect[key] = value; }); },
+    }));
+    inspector.append(h('div', { class: 'insp-card glitch-inspector', style: { '--gc': preset.color } },
+      h('div', { class: 'selection-badge' }, 'ϟ Glitch geselecteerd'), h('h3', {}, preset.name), h('p', { class: 'hint' }, preset.desc),
+      h('label', { class: 'field-label' }, 'Type glitch', h('select', { class: 'select', 'aria-label': 'Type glitch', onchange: e => mutate(() => { effect.type = e.target.value; }) },
+        ...GLITCH_PRESETS.map(item => h('option', { value: item.id, selected: item.id === effect.type }, item.name)))),
+      h('label', { class: 'field-label' }, 'Spoor', h('select', { class: 'select', 'aria-label': 'Glitchspoor', onchange: e => mutate(() => { effect.trackId = e.target.value; }) }, ...tl.tracks.map(track => h('option', { value: track.id, selected: track.id === effect.trackId }, track.name)))),
+      numberField('start', 'Start glitch (seconden)', 0), numberField('duration', 'Lengte glitch (seconden)', 0.04),
+      h('button', { class: 'btn btn-sm', id: 'fit-glitch-btn', disabled: !matchingClip, onclick: () => mutate(() => { effect.start = matchingClip.start; effect.duration = matchingClip.duration; }) }, 'Passend op audioclip'),
+      toggle('enabled', 'Glitchblok actief', 'Schakel het hele glitchblok in of uit.'),
+      dynamicControls, audioControls,
+      h('div', { class: 'glitch-control-group' }, h('h4', {}, 'Beeld in preview en export'),
+        toggle('visual', 'Visuele glitch', 'Laat het beeld reageren op deze storingen.'),
+        effect.visual !== false ? control('visualAmount', 'Sterkte visuele glitch', 0, 1, 0.05, 1, percent) : null,
+        h('p', { class: 'hint' }, 'Overlappende triggers worden één beeldglitch. De Glitch-knop op een spoor blijft apart werken.')),
+      h('button', { class: 'btn btn-sm', id: 'preview-glitch-btn', onclick: async e => {
+        const button = e.currentTarget;
+        if (button.classList.contains('playing')) { previewAudio.stop(); return; }
+        const done = busy('Glitch voorbereiden…'); button.disabled = true;
+        try {
+          const timeline = { ...tl, tracks: tl.tracks.map(track => ({ ...track, solo: track.id === effect.trackId })) };
+          const { pcm } = await engine.renderMix(timeline);
+          const start = Math.round(Math.max(0, effect.start - 0.2) * SR), end = Math.min(pcm.length, Math.round((effect.start + effect.duration + 0.2) * SR));
+          if (end <= start) throw new Error('Leg dit glitchblok eerst over audio op hetzelfde spoor.');
+          if (button.isConnected) await previewAudio.playPcm(pcm.slice(start, end), button);
+        } catch (error) { toast(error.message, 'err'); } finally { done(); button.disabled = false; }
+      } }, icon('play'), 'Dit moment beluisteren'),
+      h('button', { class: 'btn btn-sm btn-ghost', id: 'duplicate-glitch-btn', onclick: duplicateSelected }, icon('copy'), 'Glitch dupliceren'),
+      h('button', { class: 'btn btn-sm btn-ghost', id: 'delete-glitch-btn', onclick: deleteSelected }, icon('trash'), 'Glitch verwijderen'),
+      h('p', { class: 'hint' }, 'Alleen het gekleurde bereik op dit spoor verandert. Sleep het blok of de randen voor een ander moment.')));
+    // Keep auditioning within reach before the optional sound controls.
+    const card = audioControls.parentElement;
+    card.insertBefore(card.querySelector('#preview-glitch-btn'), dynamicControls);
+  }
+
   function renderInspector() {
     stopFxPreview();
     closeFxPicker();
     inspector.replaceChildren();
     const list = sel();
+    if (list.length) selectedEffectId = null;
+    if (selectedEffect()) {
+      selectionStatus.textContent = '1 glitch geselecteerd'; selectionStatus.classList.add('has-selection');
+      $('#delete-btn', transport).disabled = false;
+      renderGlitchInspector(selectedEffect()); return;
+    }
+    if (rangeSelection && !list.length) {
+      selectionStatus.textContent = `${rangeSelection.duration.toFixed(2)}s geselecteerd`; selectionStatus.classList.add('has-selection'); $('#delete-btn', transport).disabled = true;
+      inspector.append(h('div', { class: 'insp-card glitch-inspector' }, h('div', { class: 'selection-badge' }, '↔ Bereik geselecteerd'),
+        h('h3', {}, 'Glitch op dit moment'), h('p', { class: 'hint' }, `${tl.tracks.find(track => track.id === rangeSelection.trackId)?.name} · ${rangeSelection.start.toFixed(2)}s – ${(rangeSelection.start + rangeSelection.duration).toFixed(2)}s`),
+        h('div', { class: 'glitch-range-types' }, ...GLITCH_PRESETS.map(preset => h('button', { class: 'btn btn-sm', 'data-range-glitch': preset.id, onclick: () => addGlitch(preset.id) }, `${preset.icon} ${preset.name}`))),
+        h('p', { class: 'hint' }, 'Kies een effect. Daarna kun je het glitchblok verplaatsen, inkorten en aanpassen.')));
+      return;
+    }
     selectionStatus.textContent = list.length ? `${list.length} clip${list.length > 1 ? 's' : ''} geselecteerd` : `${tl.clips.length} clip${tl.clips.length !== 1 ? 's' : ''} · ${tl.tracks.length} spoor${tl.tracks.length > 1 ? 'en' : ''}`;
     selectionStatus.classList.toggle('has-selection', !!list.length);
     $('#delete-btn', transport).disabled = !list.length;
     if (!list.length) {
-      inspector.append(h('div', { class: 'insp-empty' }, h('div', { class: 'empty-audio-icon' }, icon('edit')), h('b', {}, 'Jouw audio, jouw verhaal'), h('p', {}, 'Klik op een audioblok om het volume, de timing of een stemeffect aan te passen. Kies bij de spoornaam een stemeffect voor het hele spoor.')),
+      inspector.append(h('div', { class: 'insp-empty' }, h('div', { class: 'empty-audio-icon' }, icon('edit')), h('b', {}, 'Jouw audio, jouw verhaal'), h('p', {}, 'Klik op audio voor clipinstellingen, of kies Bereik en sleep over audio voor een glitch op een specifiek moment. Kies bij de spoornaam een stemeffect voor het hele spoor.')),
         h('div', { class: 'editing-tip' }, h('b', {}, 'Snel bewerken'), h('p', {}, 'Sleep een blok om het te verplaatsen. Gebruik de randen om het begin of einde in te korten.'), h('p', {}, 'Klik met rechts op een blok voor alle bewerkingen.')),
         inspectorSection('keys', 'Sneltoetsen', h('div', { class: 'kbd-list' }, ...[['Afspelen / pauze', 'Spatie'], ['Splitsen', 'S'], ['Verwijderen', 'Delete'], ['Kopiëren / plakken', 'Ctrl+C / V'], ['Knippen', 'Ctrl+X'], ['Dupliceren', 'Ctrl+D'], ['Ongedaan maken', 'Ctrl+Z'], ['Opnieuw', 'Ctrl+Shift+Z'], ['Alles selecteren', 'Ctrl+A'], ['Meerdere selecteren', 'Shift+klik'], ['Zoomen', 'Ctrl+scroll']].map(([a, k]) => h('div', {}, h('span', {}, a), h('kbd', {}, k))))));
       return;
@@ -2162,17 +2481,18 @@ export async function mount(root, { id }) {
     const k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
     if (contextMenu) { if (k === 'escape') { e.preventDefault(); closeContextMenu(true); } return; }
     if (k === ' ') { e.preventDefault(); togglePlay(); }
-    else if (k === 's' && !mod) { e.preventDefault(); splitAtPlayhead(); }
-    else if ((k === 'delete' || k === 'backspace') && selected.size) { e.preventDefault(); deleteSelected(); }
+    else if (k === 's' && !mod && !selectedEffect()) { e.preventDefault(); splitAtPlayhead(); }
+    else if ((k === 'delete' || k === 'backspace') && (selected.size || selectedEffect())) { e.preventDefault(); deleteSelected(); }
     else if (k === 'z' && mod && e.shiftKey) { e.preventDefault(); doRedo(); }
     else if (k === 'z' && mod) { e.preventDefault(); doUndo(); }
     else if (k === 'y' && mod) { e.preventDefault(); doRedo(); }
-    else if (k === 'c' && mod && selected.size) { e.preventDefault(); copySelected(); }
-    else if (k === 'x' && mod && selected.size) { e.preventDefault(); copySelected(true); }
-    else if (k === 'v' && mod && clipboard.length) { e.preventDefault(); pasteClips(); }
+    else if (k === 'c' && mod && (selected.size || selectedEffect())) { e.preventDefault(); copySelected(); }
+    else if (k === 'x' && mod && (selected.size || selectedEffect())) { e.preventDefault(); copySelected(true); }
+    else if (k === 'v' && mod && (clipboard.length || effectClipboard)) { e.preventDefault(); pasteClips(); }
     else if (k === 'd' && mod) { e.preventDefault(); duplicateSelected(); }
-    else if (k === 'a' && mod) { e.preventDefault(); selected = new Set(tl.clips.map((c) => c.id)); renderTimeline(); renderInspector(); }
-    else if (k === 'escape') { selected.clear(); renderTimeline(); renderInspector(); }
+    else if (k === 'a' && mod) { e.preventDefault(); selectedEffectId = null; rangeSelection = null; selected = new Set(tl.clips.map((c) => c.id)); renderTimeline(); renderInspector(); }
+    else if (k === 'escape') { selected.clear(); selectedEffectId = null; rangeSelection = null; setRangeMode(false); renderTimeline(); renderInspector(); }
+    else if (k === 'r' && !mod) { e.preventDefault(); setRangeMode(!rangeMode); }
     else if (k === 'home') { setPlayhead(0); }
     else if (k === 'end') { setPlayhead(contentEnd()); }
     else if (k === 'arrowleft') { e.preventDefault(); setPlayhead(playhead - (e.shiftKey ? 0.1 : 1)); }
@@ -2193,6 +2513,7 @@ export async function mount(root, { id }) {
     try { const src = { type: 'asset', id: a.id }; await engine.getSource(src); a.duration = engine.sourceDuration(src); api.updateAsset(a.id, { duration: a.duration }); if (!destroyed) renderMedia(); } catch {}
   });
   tl.clips.forEach((c) => engine.getSource(c.src).catch(() => {}));
+  scheduleMixWarmup();
 
   return () => {
     destroyed = true;
@@ -2204,7 +2525,7 @@ export async function mount(root, { id }) {
     closeFxPicker();
     closeContextMenu();
     disposePanels();
-    ro.disconnect(); stopPlay(); cancelAnimationFrame(raf);
+    ro.disconnect(); stopPlay(); cancelAnimationFrame(raf); cancelAnimationFrame(waveFrame); clearTimeout(mixWarmupTimer); scrubPlayer.dispose();
     player.dispose();
     if (rec) { try { rec.recorder.stop(); } catch {} }
     if (saveTimer) { clearTimeout(saveTimer); api.updateProject(id, { timeline: tl, duration: contentEnd() }).catch(() => {}); }
@@ -2217,11 +2538,13 @@ function normalize(t) {
   // Replace the old untouched starter layout; preserve all edited projects.
   const oldStarter = ['t_voice', 't_sfx', 't_music'];
   const oldNames = ['Stem', 'Sound effects', 'Muziek / extra'];
-  if (!t.clips?.length && t.tracks.length === 3 && t.tracks.every((track, i) => track.id === oldStarter[i] && track.name === oldNames[i] && track.gain === (i === 2 ? 0.8 : 1) && !track.mute && !track.solo && !track.glitch && (!track.fx || track.fx === 'none'))) return { ...d, zoom: t.zoom || d.zoom };
+  if (!t.clips?.length && !t.effects?.length && t.tracks.length === 3 && t.tracks.every((track, i) => track.id === oldStarter[i] && track.name === oldNames[i] && track.gain === (i === 2 ? 0.8 : 1) && !track.mute && !track.solo && !track.glitch && (!track.fx || track.fx === 'none'))) return { ...d, zoom: t.zoom || d.zoom };
   return {
     ...d,
     ...t,
     tracks: t.tracks.map((tr) => ({ glitch: false, fx: 'none', fxAmount: 1, ...tr, glitch: Boolean(tr.glitch) })),
     clips: (t.clips || []).map((c) => ({ ...clipDefaults(), ...c })),
+    effects: (Array.isArray(t.effects) ? t.effects : []).filter(effect => GLITCH_BY_ID[effect.type] && t.tracks.some(track => track.id === effect.trackId) && Number.isFinite(effect.start) && Number.isFinite(effect.duration) && effect.duration > 0)
+      .map(effect => ({ ...glitchDefaults(), ...effect, dynamic: isDynamicGlitch(effect), start: Math.max(0, effect.start), duration: Math.max(0.04, effect.duration) })),
   };
 }

@@ -716,8 +716,11 @@ body.is-dragging-item .folder-crumb svg {
 .clip .fade.out { right: 0; background: linear-gradient(to bottom left, rgba(0, 0, 0, 0.55) 50%, transparent 50%); }
 .clip.processing::after { content: ''; position: absolute; inset: 18px 0 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-.playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; z-index: 8; pointer-events: none; box-shadow: 0 0 10px rgba(255, 255, 255, 0.6); }
-.playhead::before { content: ''; position: absolute; top: 0; left: -6px; border: 7px solid transparent; border-top: 9px solid #fff; }
+.playhead { position: absolute; top: 0; bottom: 0; left: -6px; width: 14px; z-index: 8; cursor: ew-resize; touch-action: none; }
+.playhead::before { content: ''; position: absolute; top: 0; left: 0; border: 7px solid transparent; border-top: 9px solid #fff; }
+.playhead::after { content: ''; position: absolute; top: 0; bottom: 0; left: 6px; width: 2px; background: #fff; box-shadow: 0 0 10px rgba(255, 255, 255, 0.6); pointer-events: none; }
+.scrubbing .playhead::after { background: #a5d8ff; box-shadow: 0 0 12px #60a5fa; }
+.ruler[aria-busy=true] { cursor: progress; }
 .snap-line { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent-3); box-shadow: 0 0 8px var(--accent-3); z-index: 7; pointer-events: none; display: none; }
 .tl-empty { position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%); text-align: center; color: var(--dim); pointer-events: none; font-size: 14px; line-height: 1.6; }
 .tl-empty .big { font-size: 34px; margin-bottom: 6px; opacity: 0.6; }
@@ -805,7 +808,7 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .editor .panel-heading { min-height: 54px; padding: 16px; display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 14px; border-bottom: 1px solid var(--line); }
 .editor .panel-heading .ico { color: #9fb8ff; }
 .editor .panel-tabs { margin: 12px 14px 0; padding: 4px; border: 1px solid var(--line); border-radius: 11px; background: #0b1121; }
-.editor .panel-tabs .tab { border-radius: 7px; }
+.editor .panel-tabs .tab { border-radius: 7px; min-width: 0; padding: 0 4px; font-size: 11px; white-space: nowrap; }
 .editor .panel-body { padding: 16px 14px; gap: 14px; min-width: 0; grid-template-columns: minmax(0, 1fr); grid-auto-rows: max-content; scrollbar-gutter: stable; }
 .editor .panel-body > * { min-width: 0; max-width: 100%; }
 .editor .btn-record { white-space: normal; height: auto; min-height: 40px; padding: 10px 12px; font-size: 13px; line-height: 1.4; }
@@ -923,6 +926,36 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .editor .clip .handle { width: 9px; background: #06102520; }
 .editor .clip.sel .handle::after { content: ''; position: absolute; width: 2px; height: 22px; top: calc(50% - 11px); left: 3px; border-radius: 2px; background: #e6f0ff; }
 .editor .clip .fade { top: 29px; }
+.editor .track-lane.has-glitch-effects .clip { top: 8px; bottom: 36px; }
+.editor .track-lane.has-glitch-effects .clip .clabel { height: 24px; line-height: 24px; font-size: 11px; }
+.editor .track-lane.has-glitch-effects .clip canvas { top: 27px; height: calc(100% - 46px); }
+.editor .track-lane.has-glitch-effects .clip-meta { bottom: 4px; font-size: 9px; }
+.glitch-region { position: absolute; top: 0; bottom: 0; min-width: 8px; z-index: 4; pointer-events: none; }
+.glitch-footprint { position: absolute; inset: 8px 0 35px; border: 1px solid color-mix(in srgb, var(--gc) 70%, transparent); border-radius: 5px; background: repeating-linear-gradient(110deg, transparent 0 8px, color-mix(in srgb, var(--gc) 23%, transparent) 8px 12px); }
+.glitch-overlay { position: absolute; bottom: 5px; left: 0; right: 0; height: 24px; border: 1px solid var(--gc); border-radius: 5px; background: color-mix(in srgb, var(--gc) 27%, #11192c); color: #fff; font-size: 10px; display: flex; align-items: center; cursor: grab; touch-action: none; pointer-events: auto; overflow: hidden; }
+.glitch-label { padding: 0 10px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; pointer-events: none; }
+.glitch-handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; background: #ffffff17; z-index: 1; }
+.glitch-handle.l { left: 0; } .glitch-handle.r { right: 0; }
+.glitch-region.selected { z-index: 8; }
+.glitch-region.selected .glitch-overlay { border-color: #fff; box-shadow: 0 0 0 2px var(--gc); }
+.glitch-region.selected .glitch-footprint { border-color: var(--gc); background-color: color-mix(in srgb, var(--gc) 10%, transparent); }
+.glitch-region.disabled { opacity: 0.4; }
+.track-lane.muted .glitch-region { opacity: 0.4; }
+.timeline-range { position: absolute; top: 4px; bottom: 4px; z-index: 6; pointer-events: none; border: 2px dashed #fbbf24; border-radius: 5px; background: #fbbf2426; }
+.timeline-range > span { position: absolute; bottom: 5px; left: 5px; color: #fff1ba; background: #382809; padding: 3px 5px; border-radius: 4px; font-size: 10px; white-space: nowrap; }
+.range-select-mode .track-lane, .range-select-mode .clip { cursor: crosshair; }
+.glitch-library-intro { display: grid; gap: 10px; }
+.glitch-library-intro h5 { margin: 0; }
+.glitch-library-intro p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.glitch-choice { width: 100%; min-width: 0; padding: 12px 9px; display: flex; align-items: center; gap: 9px; border: 1px solid color-mix(in srgb, var(--gc) 38%, var(--line)); border-radius: 10px; background: #182137; text-align: left; cursor: grab; }
+.glitch-choice:hover { background: color-mix(in srgb, var(--gc) 14%, #182137); border-color: var(--gc); }
+.glitch-symbol { color: var(--gc); font-size: 24px; width: 24px; flex-shrink: 0; text-align: center; }
+.glitch-choice-copy { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.glitch-choice-copy b { font-size: 12px; }
+.glitch-choice-copy > span { font-size: 11px; line-height: 1.5; color: var(--muted); }
+.glitch-inspector h3 { font-size: 18px; margin: 0; }
+.glitch-inspector .selection-badge { color: var(--gc, #fbbf24); }
+.glitch-range-types { display: grid; gap: 7px; }
 .editor .tl-empty { left: 172px; right: 0; top: 180px; transform: none; padding: 30px; pointer-events: auto; }
 .editor .tl-empty b { display: block; color: #e0e8ff; font-size: 19px; }
 .editor .tl-empty p { max-width: 340px; margin: 10px auto 20px; color: var(--dim); font-size: 13px; }
@@ -950,6 +983,29 @@ kbd { font-family: var(--mono); font-size: 11px; padding: 2px 6px; border-radius
 .editor .field-label .select, .editor .field-label .input, .editor #voice-fx-select { width: 100%; min-width: 0; }
 .editor .slider-row { grid-template-columns: 67px minmax(0, 1fr) 46px; gap: 6px; font-size: 12px; }
 .editor .slider-row input { width: 100%; min-width: 0; }
+.editor .slider-row.stacked { grid-template-columns: minmax(0, 1fr) max-content; gap: 8px 12px; color: #e2eaff; }
+.editor .slider-row.stacked > span { grid-column: 1; grid-row: 1; min-width: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.editor .slider-row.stacked > output { grid-column: 2; grid-row: 1; color: #f4f7ff; font-size: 12px; white-space: nowrap; }
+.editor .slider-row.stacked > input { grid-column: 1 / -1; grid-row: 2; margin: 0; }
+.glitch-inspector { min-width: 0; color: #edf2ff; }
+.glitch-inspector .field-label { color: #cbd7f0; }
+.glitch-inspector .hint { color: #b4c3df; line-height: 1.65; margin: 0; }
+.glitch-control-group { display: grid; gap: 16px; min-width: 0; padding-top: 18px; border-top: 1px solid #34425f; }
+.glitch-control-group h4 { margin: 0; color: #edf2ff; font-size: 13px; font-weight: 600; }
+.glitch-controls { display: grid; gap: 18px; min-width: 0; }
+.glitch-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 12px; border: 1px solid #445575; border-radius: 10px; background: #101a2d; color: #e7efff; text-align: left; cursor: pointer; }
+.glitch-toggle.on { border-color: #5886da; background: #203455; }
+.glitch-toggle-copy { display: grid; gap: 5px; min-width: 0; }
+.glitch-toggle-copy b { font-size: 12px; font-weight: 600; line-height: 1.5; }
+.glitch-toggle-copy > span { font-size: 11px; color: #bdcce7; line-height: 1.5; }
+.glitch-switch { width: 30px; height: 18px; border-radius: 12px; background: #536079; padding: 3px; flex-shrink: 0; }
+.glitch-switch::after { content: ''; display: block; width: 12px; height: 12px; border-radius: 50%; background: #f0f5ff; transition: transform .15s; }
+.glitch-toggle.on .glitch-switch { background: #4b8cf3; }
+.glitch-toggle.on .glitch-switch::after { transform: translateX(12px); }
+.glitch-parts { display: grid; gap: 12px; padding: 14px 12px; border: 1px solid #445575; border-radius: 10px; margin: 0; min-width: 0; }
+.glitch-parts legend { color: #cbd7f0; font-size: 12px; padding: 0 5px; }
+.glitch-parts label { display: flex; align-items: center; gap: 10px; font-size: 12px; line-height: 1.5; color: #e7efff; cursor: pointer; }
+.glitch-parts input { accent-color: #88b4ff; width: 16px; height: 16px; flex-shrink: 0; }
 .editor .inspector-section { display: block; padding: 0; }
 .inspector-section > summary { cursor: pointer; padding: 15px 14px; font-size: 13px; font-weight: 500; color: #dce5fa; }
 .inspector-section[open] > summary { border-bottom: 1px solid var(--line); }
