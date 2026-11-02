@@ -66,6 +66,8 @@ Exporteer elk ontwerp als **PNG** of **JPG**, op standaardresolutie of extra sch
 
 ### 3. 🎭 Stemeffecten (Voice FX)
 Selecteer een clip en kies uit 27 effecten plus de originele stem. Kies eerst een klank, vergelijk **Origineel** en **Met effect** op de eerste zes seconden van je eigen clip, stel de **Sterkte** in en klik op **Toepassen**. Annuleren verandert je clip niet.
+- **Effect op een heel spoor**: Klik op **FX · Stemeffect kiezen** onder de spoornaam, of open **Spooreffect** in de clipinstellingen. Kies een klank en sterkte en klik op **Toepassen op hele spoor**. Alle clips op dat spoor krijgen het effect, ook nieuwe of verplaatste voice lines. Het effect werkt op de gezamenlijke audio van het spoor en wordt meegenomen bij afspelen, voorvertonen en exporteren. Je kunt het later aanpassen, verwijderen of ongedaan maken. Clipeffecten blijven aanvullend actief.
+- **Samenvoegen met spooreffecten**: Binnen één spoor blijft het spooreffect apart instelbaar. Een selectie uit meerdere sporen wordt inclusief hun effecten samengevoegd op een nieuw spoor, zodat effecten niet dubbel worden toegepast.
 - De ruime effectenbibliotheek opent als een gecentreerd dialoogvenster: links zoek je en blader je door klanken; rechts staan de geselecteerde klank, sterkte en luistervoorbeelden. De keuze wordt pas opgeslagen na toepassen.
 - **Basis**: Originele stem, Studio / helder en Presentator / warm.
 - **Radio & Portofoon**: Digitale portofoon, Oude AM-radio, FM-radio / omroep, Meldkamer, Walkie-talkie (met korte ruis & eindpiep), Militaire veldradio, Beschadigde radio en Subtiele radio.

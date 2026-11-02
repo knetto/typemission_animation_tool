@@ -12,7 +12,7 @@ export function defaultTimeline() {
     version: 1,
     zoom: 90,
     tracks: [
-      { id: 't_voice', name: 'Audio 1', kind: 'voice', gain: 1, mute: false, solo: false, glitch: false },
+      { id: 't_voice', name: 'Audio 1', kind: 'voice', gain: 1, mute: false, solo: false, glitch: false, fx: 'none', fxAmount: 1 },
     ],
     clips: [],
   };
@@ -96,26 +96,39 @@ export class AudioEngine {
     const bufs = await Promise.all(clips.map((c) => this.processClip(c)));
     const base = clipIds ? Math.min(...clips.map((c) => c.start), Infinity) : 0;
     const offset = Number.isFinite(base) ? base : 0;
-    let total = 1;
-    clips.forEach((c, i) => { total = Math.max(total, Math.round((c.start - offset) * SR) + bufs[i].length); });
-    const mix = new Float32Array(total);
-    const hasGlitchTrack = clips.some((c) => Boolean(tracks[c.trackId]?.glitch));
-    const glitchMix = hasGlitchTrack ? new Float32Array(total) : null;
-    clips.forEach((c, i) => {
-      const y = bufs[i], s0 = Math.round((c.start - offset) * SR);
-      const tr = tracks[c.trackId];
-      const g = c.gain * (tr.gain ?? 1);
-      const isGlitch = Boolean(tr.glitch);
-      const dlen = Math.round(c.duration * SR), fi = c.fadeIn * SR, fo = c.fadeOut * SR;
-      for (let k = 0; k < y.length; k++) {
-        let env = 1;
-        if (fi > 0 && k < fi) env = k / fi;
-        if (fo > 0) { if (k >= dlen) env = 0; else if (k > dlen - fo) env = Math.min(env, (dlen - k) / fo); }
-        const val = y[k] * g * env;
-        mix[s0 + k] += val;
-        if (isGlitch && glitchMix) glitchMix[s0 + k] += val;
+    // Sum each track before its effect, so overlapping lines and effect tails
+    // share one continuous chain. Track gain follows FX to preserve volume.
+    const renderedTracks = await Promise.all(tl.tracks.map(async (track) => {
+      const entries = clips.flatMap((clip, i) => clip.trackId === track.id ? [{ clip, pcm: bufs[i], start: Math.round((clip.start - offset) * SR) }] : []);
+      if (!entries.length) return null;
+      const start = Math.min(...entries.map(entry => entry.start));
+      const length = Math.max(...entries.map(entry => entry.start - start + entry.pcm.length));
+      let pcm = new Float32Array(length);
+      for (const { clip, pcm: y, start: clipStart } of entries) {
+        const s0 = clipStart - start;
+        const dlen = Math.round(clip.duration * SR), fi = clip.fadeIn * SR, fo = clip.fadeOut * SR;
+        for (let k = 0; k < y.length; k++) {
+          let env = 1;
+          if (fi > 0 && k < fi) env = k / fi;
+          if (fo > 0) { if (k >= dlen) env = 0; else if (k > dlen - fo) env = Math.min(env, (dlen - k) / fo); }
+          pcm[s0 + k] += y[k] * clip.gain * env;
+        }
       }
-    });
+      if (track.fx && track.fx !== 'none') pcm = await applyVoiceFx(pcm, SR, track.fx, track.fxAmount ?? 1);
+      return { track, start, pcm };
+    }));
+    const activeTracks = renderedTracks.filter(Boolean);
+    const total = Math.max(1, ...activeTracks.map(({ start, pcm }) => start + pcm.length));
+    const mix = new Float32Array(total);
+    const glitchMix = activeTracks.some(({ track }) => track.glitch) ? new Float32Array(total) : null;
+    for (const { track, start, pcm } of activeTracks) {
+      const gain = track.gain ?? 1;
+      for (let i = 0; i < pcm.length; i++) {
+        const value = pcm[i] * gain;
+        mix[start + i] += value;
+        if (track.glitch && glitchMix) glitchMix[start + i] += value;
+      }
+    }
     let peak = 0;
     for (let i = 0; i < mix.length; i++) { const v = Math.abs(mix[i]); if (v > peak) peak = v; }
     if (peak > 0.98) {

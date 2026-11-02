@@ -152,7 +152,7 @@ export async function mount(root, { id }) {
   }
 
   function createTrackObject() {
-    return { id: 't_' + uid(), name: `Audio ${tl.tracks.length + 1}`, kind: 'extra', gain: 1, mute: false, solo: false, glitch: false };
+    return { id: 't_' + uid(), name: `Audio ${tl.tracks.length + 1}`, kind: 'extra', gain: 1, mute: false, solo: false, glitch: false, fx: 'none', fxAmount: 1 };
   }
 
   async function addSource(src, name, trackId, start, opts = {}) {
@@ -370,7 +370,10 @@ export async function mount(root, { id }) {
     const list = sel(); if (!list.length) return;
     const done = busy('Samenvoegen…');
     try {
-      const flat = { ...tl, tracks: tl.tracks.map((t) => ({ ...t, gain: 1, mute: false, solo: false })) };
+      const sameTrack = list.every((clip) => clip.trackId === list[0].trackId);
+      // Keep a single track's FX editable; bake separate tracks into a fresh
+      // neutral track so the destination cannot apply an effect twice.
+      const flat = { ...tl, tracks: tl.tracks.map((t) => ({ ...t, ...(sameTrack ? { gain: 1, fx: 'none' } : {}), mute: false, solo: false })) };
       const { pcm, offset } = await engine.renderMix(flat, { clipIds: list.map((c) => c.id), ignoreMute: true });
       const file = new File([encodeWav(pcm, SR)], 'samengevoegd.wav', { type: 'audio/wav' });
       const name = list.length === 1 ? `${list[0].name} (bewerkt)` : `Samengevoegd (${list.length} clips)`;
@@ -378,9 +381,11 @@ export async function mount(root, { id }) {
       assets.push(asset); renderMedia();
       const src = { type: 'asset', id: asset.id };
       await engine.getSource(src);
-      const c = makeClip(src, name, list[0].trackId, offset, engine.sourceDuration(src));
-      mutate(() => { tl.clips = tl.clips.filter((x) => !selected.has(x.id)); tl.clips.push(c); selected = new Set([c.id]); });
-      toast('Samengevoegd tot één clip — effecten zijn ingebakken', 'ok');
+      const destination = sameTrack ? trackOf(list[0]) : createTrackObject();
+      if (!sameTrack) destination.glitch = list.some(clip => trackOf(clip)?.glitch);
+      const c = makeClip(src, name, destination.id, offset, engine.sourceDuration(src));
+      mutate(() => { if (!sameTrack) tl.tracks.push(destination); tl.clips = tl.clips.filter((x) => !selected.has(x.id)); tl.clips.push(c); selected = new Set([c.id]); });
+      toast(sameTrack ? 'Samengevoegd tot één clip — het spooreffect blijft apart instelbaar' : 'Samengevoegd op een nieuw spoor — effecten zijn ingebakken', 'ok');
     } catch (e) { toast(e.message, 'err'); }
     finally { done(); }
   }
@@ -568,7 +573,13 @@ export async function mount(root, { id }) {
           const n = tl.clips.filter((c) => c.trackId === t.id).length;
           if (n && !(await modal({ title: `Spoor "${t.name}" verwijderen?`, body: `${n} clip(s) op dit spoor worden ook verwijderd.`, confirm: 'Verwijderen', danger: true }))) return;
           mutate(() => { tl.tracks = tl.tracks.filter((x) => x !== t); tl.clips = tl.clips.filter((c) => c.trackId !== t.id); });
-        } }, '×') : null));
+        } }, '×') : null),
+      h('button', {
+        class: `track-fx-btn${t.fx && t.fx !== 'none' ? ' active' : ''}`, 'data-track-fx': t.id,
+        title: 'Stemeffect voor alle huidige en nieuwe clips op dit spoor',
+        'aria-label': `Stemeffect voor ${t.name}`, 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'fx-picker-popup',
+        onclick: (e) => openFxPicker(e.currentTarget, tl.clips.filter(clip => clip.trackId === t.id), { track: t }),
+      }, 'FX · ', t.fx && t.fx !== 'none' ? `${FX_BY_ID[t.fx]?.name || 'Stemeffect'} · ${Math.round((t.fxAmount ?? 1) * 100)}%` : 'Stemeffect kiezen'));
   }
 
   function clipEl(c, color) {
@@ -1888,7 +1899,7 @@ export async function mount(root, { id }) {
     fxPreviewButton = null;
   }
 
-  function voicePreviewButton(label, getClip) {
+  function voicePreviewButton(label, getClip, getTrack = () => null) {
     const button = h('button', { class: 'btn btn-sm fx-preview-btn', type: 'button' }, icon('play'), label);
     button.addEventListener('statechange', (e) => button.replaceChildren(icon(e.detail ? 'pause' : 'play'), label));
     button.onclick = async () => {
@@ -1901,7 +1912,12 @@ export async function mount(root, { id }) {
       button.replaceChildren(h('span', { class: 'spinner' }), 'Laden…');
       try {
         // Audition the first six seconds of this clip without changing it.
-        const pcm = await engine.processClip({ ...clip, duration: Math.min(6, clip.duration) });
+        const duration = Math.min(6, clip.duration);
+        const sample = { ...clip, start: 0, duration, offset: clip.reverse ? clip.offset + (clip.duration - duration) * clip.speed : clip.offset };
+        const track = getTrack();
+        const pcm = track
+          ? (await engine.renderMix({ tracks: [track], clips: [sample] }, { ignoreMute: true })).pcm
+          : await engine.processClip(sample);
         if (token === fxPreviewToken && button.isConnected) await previewAudio.playPcm(pcm, button);
       } catch (error) { if (token === fxPreviewToken) toast(error.message, 'err'); }
       finally {
@@ -1912,12 +1928,14 @@ export async function mount(root, { id }) {
     return button;
   }
 
-  function openFxPicker(trigger, clips) {
+  function openFxPicker(trigger, clips, { track = null } = {}) {
     if (fxPopup) { closeFxPicker(true); return; }
     closeContextMenu(); fxTrigger = trigger;
     trigger.setAttribute('aria-expanded', 'true');
-    const currentFx = clips[0].fx;
-    let draftFx = currentFx, draftAmount = clips[0].fxAmount ?? 1;
+    const targets = track ? [track] : clips;
+    const currentFx = targets[0].fx || 'none';
+    const previewClip = [...clips].sort((a, b) => a.start - b.start)[0];
+    let draftFx = currentFx, draftAmount = targets[0].fxAmount ?? 1;
     let category = currentFx === 'none' ? 'Populair' : (FX_BY_ID[currentFx]?.group || 'Populair'), query = '';
     const search = h('input', { class: 'input fx-search', type: 'search', placeholder: 'Zoek een stemeffect…', 'aria-label': 'Zoek een stemeffect' });
     const categories = h('div', { class: 'fx-categories', 'aria-label': 'Effectcategorieën' });
@@ -1939,15 +1957,17 @@ export async function mount(root, { id }) {
     const draftStatus = h('span', { class: 'fx-draft-status', 'aria-live': 'polite' });
     const strength = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: draftAmount, 'aria-label': 'Sterkte van het voorbeeld' });
     const strengthValue = h('output');
-    const originalPreview = voicePreviewButton('Origineel', () => ({ ...clips[0], fx: 'none' }));
-    const effectPreview = voicePreviewButton('Met effect', () => ({ ...clips[0], fx: draftFx, fxAmount: draftAmount }));
+    const originalPreview = voicePreviewButton(track ? 'Zonder spooreffect' : 'Origineel', () => ({ ...previewClip, ...(track ? {} : { fx: 'none' }) }), () => track ? { ...track, fx: 'none' } : null);
+    const effectPreview = voicePreviewButton('Met effect', () => ({ ...previewClip, ...(track ? {} : { fx: draftFx, fxAmount: draftAmount }) }), () => track ? { ...track, fx: draftFx, fxAmount: draftAmount } : null);
+    originalPreview.disabled = !previewClip;
+    originalPreview.dataset.unavailable = String(!previewClip);
     const applyButton = h('button', { class: 'btn btn-primary btn-sm', id: 'fx-apply-btn', type: 'button', onclick: () => {
-      if (clips.some((clip) => !tl.clips.includes(clip))) { closeFxPicker(); return; }
+      if (track ? !tl.tracks.includes(track) : clips.some((clip) => !tl.clips.includes(clip))) { closeFxPicker(); return; }
       const id = draftFx, amount = draftAmount;
       closeFxPicker();
-      if (clips.some((clip) => clip.fx !== id || clip.fxAmount !== amount)) mutate(() => clips.forEach((clip) => { clip.fx = id; clip.fxAmount = amount; }));
-      $('#voice-fx-select', inspector)?.focus({ preventScroll: true });
-    } }, clips.length > 1 ? `Toepassen op ${clips.length} clips` : 'Effect toepassen');
+      if (targets.some((target) => target.fx !== id || target.fxAmount !== amount)) mutate(() => targets.forEach((target) => { target.fx = id; target.fxAmount = amount; }));
+      (track ? headsInner.querySelector(`[data-track-fx="${track.id}"]`) : $('#voice-fx-select', inspector))?.focus({ preventScroll: true });
+    } }, track ? 'Toepassen op hele spoor' : clips.length > 1 ? `Toepassen op ${clips.length} clips` : 'Effect toepassen');
     function updateDraft() {
       const selectedPreset = FX_BY_ID[draftFx] || FX_BY_ID.none;
       selectionName.textContent = selectedPreset.name;
@@ -1958,10 +1978,10 @@ export async function mount(root, { id }) {
       strengthValue.textContent = Math.round(draftAmount * 100) + '%';
       strength.disabled = draftFx === 'none';
       strength.closest('.fx-strength-section').hidden = draftFx === 'none';
-      effectPreview.disabled = draftFx === 'none';
-      effectPreview.dataset.unavailable = String(draftFx === 'none');
-      applyButton.disabled = clips.every((clip) => clip.fx === draftFx && (clip.fxAmount ?? 1) === draftAmount);
-      draftStatus.textContent = applyButton.disabled ? 'Je clip is nog niet gewijzigd.' : 'Pas toe om deze klank te bewaren.';
+      effectPreview.disabled = draftFx === 'none' || !previewClip;
+      effectPreview.dataset.unavailable = String(effectPreview.disabled);
+      applyButton.disabled = targets.every((target) => (target.fx || 'none') === draftFx && (target.fxAmount ?? 1) === draftAmount);
+      draftStatus.textContent = applyButton.disabled ? (track ? 'Je spoor is nog niet gewijzigd.' : 'Je clip is nog niet gewijzigd.') : 'Pas toe om deze klank te bewaren.';
     }
     strength.oninput = () => { stopFxPreview(); draftAmount = Number(strength.value); updateDraft(); };
     const paintChoices = () => {
@@ -1977,7 +1997,7 @@ export async function mount(root, { id }) {
           class: `fx-choice${preset.id === draftFx ? ' selected' : ''}`, 'data-fx': preset.id, 'aria-pressed': String(preset.id === draftFx), onclick: () => {
             stopFxPreview();
             draftFx = preset.id;
-            draftAmount = preset.id === currentFx ? (clips[0].fxAmount ?? 1) : 1;
+            draftAmount = preset.id === currentFx ? (targets[0].fxAmount ?? 1) : 1;
             paintChoices();
             choices.querySelector(`[data-fx="${preset.id}"]`)?.focus({ preventScroll: true });
           },
@@ -1989,8 +2009,8 @@ export async function mount(root, { id }) {
     search.addEventListener('input', () => { query = search.value; category = query ? 'Alles' : category; categoryButtons.forEach(button => button.setAttribute('aria-pressed', String(button.textContent === category))); choices.scrollTop = 0; paintChoices(); });
     fxPopup = h('dialog', { class: 'fx-picker-popup', id: 'fx-picker-popup', 'aria-labelledby': 'fx-picker-title' },
       h('div', { class: 'fx-picker-header' },
-        h('div', {}, h('h2', { id: 'fx-picker-title' }, 'Geef je stem een andere klank'),
-          h('p', { class: 'fx-picker-intro' }, 'Kies een effect, vergelijk het met je opname en pas het toe wanneer je tevreden bent.')),
+        h('div', {}, h('h2', { id: 'fx-picker-title' }, track ? `Stemeffect voor ${track.name}` : 'Geef je stem een andere klank'),
+          h('p', { class: 'fx-picker-intro' }, track ? 'Dit effect geldt voor alle clips op dit spoor, ook als je later nieuwe voice lines toevoegt. Eventuele clipeffecten blijven aanvullend actief.' : 'Kies een effect, vergelijk het met je opname en pas het toe wanneer je tevreden bent.')),
         h('button', { class: 'btn btn-icon btn-ghost', 'aria-label': 'Stemeffectmenu sluiten', onclick: () => closeFxPicker(true) }, '×')),
       h('div', { class: 'fx-picker-body' },
         h('div', { class: 'fx-browser' }, search, categories, resultsLabel, choices),
@@ -2000,9 +2020,10 @@ export async function mount(root, { id }) {
             h('label', { class: 'fx-strength' }, h('span', {}, 'Sterkte'), strength, strengthValue),
             h('div', { class: 'fx-strength-labels' }, h('span', {}, 'Subtiel'), h('span', {}, 'Volledig'))),
           h('div', { class: 'fx-preview-section' }, h('b', {}, 'Vergelijk je stem'),
-            h('span', { class: 'fx-preview-hint' }, `Eerste ${Math.min(6, clips[0].duration).toFixed(1)} seconden van “${clips[0].name}”.`),
+            h('span', { class: 'fx-preview-hint' }, previewClip ? `Eerste ${Math.min(6, previewClip.duration).toFixed(1)} seconden van “${previewClip.name}”.` : 'Voeg een clip toe aan dit spoor om het effect te beluisteren.'),
             h('div', { class: 'fx-compare' }, originalPreview, effectPreview)))),
       h('div', { class: 'fx-picker-footer' }, draftStatus,
+        track && currentFx !== 'none' ? h('button', { class: 'btn btn-sm btn-ghost', id: 'track-fx-reset-btn', onclick: () => { stopFxPreview(); draftFx = 'none'; draftAmount = 1; paintChoices(); } }, 'Spooreffect verwijderen') : null,
         h('div', {}, h('button', { class: 'btn btn-ghost', onclick: () => closeFxPicker(true) }, 'Annuleren'), applyButton)));
     fxPopup.addEventListener('cancel', (event) => { event.preventDefault(); closeFxPicker(true); });
     fxPopup.addEventListener('click', (event) => {
@@ -2036,7 +2057,7 @@ export async function mount(root, { id }) {
     selectionStatus.classList.toggle('has-selection', !!list.length);
     $('#delete-btn', transport).disabled = !list.length;
     if (!list.length) {
-      inspector.append(h('div', { class: 'insp-empty' }, h('div', { class: 'empty-audio-icon' }, icon('edit')), h('b', {}, 'Jouw audio, jouw verhaal'), h('p', {}, 'Klik op een audioblok om het volume, de timing of een stemeffect aan te passen.')),
+      inspector.append(h('div', { class: 'insp-empty' }, h('div', { class: 'empty-audio-icon' }, icon('edit')), h('b', {}, 'Jouw audio, jouw verhaal'), h('p', {}, 'Klik op een audioblok om het volume, de timing of een stemeffect aan te passen. Kies bij de spoornaam een stemeffect voor het hele spoor.')),
         h('div', { class: 'editing-tip' }, h('b', {}, 'Snel bewerken'), h('p', {}, 'Sleep een blok om het te verplaatsen. Gebruik de randen om het begin of einde in te korten.'), h('p', {}, 'Klik met rechts op een blok voor alle bewerkingen.')),
         inspectorSection('keys', 'Sneltoetsen', h('div', { class: 'kbd-list' }, ...[['Afspelen / pauze', 'Spatie'], ['Splitsen', 'S'], ['Verwijderen', 'Delete'], ['Kopiëren / plakken', 'Ctrl+C / V'], ['Knippen', 'Ctrl+X'], ['Dupliceren', 'Ctrl+D'], ['Ongedaan maken', 'Ctrl+Z'], ['Opnieuw', 'Ctrl+Shift+Z'], ['Alles selecteren', 'Ctrl+A'], ['Meerdere selecteren', 'Shift+klik'], ['Zoomen', 'Ctrl+scroll']].map(([a, k]) => h('div', {}, h('span', {}, a), h('kbd', {}, k))))));
       return;
@@ -2065,20 +2086,30 @@ export async function mount(root, { id }) {
     const mixedFx = list.some((clip) => clip.fx !== c.fx);
     const fxSelect = h('button', { class: 'fx-picker-trigger', id: 'voice-fx-select', type: 'button', 'aria-label': 'Stemeffect kiezen', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'fx-picker-popup', onclick: (e) => openFxPicker(e.currentTarget, list) },
       h('span', { class: 'fx-choice-icon', 'aria-hidden': 'true' }, mixedFx ? '🎛️' : preset.emoji), h('span', { class: 'fx-choice-text' }, h('b', {}, mixedFx ? 'Verschillende effecten' : preset.name), h('span', {}, mixedFx ? 'Kies een klank voor alle geselecteerde clips' : `${preset.group} · Effect kiezen`)), h('span', { class: 'fx-picker-chevron', 'aria-hidden': 'true' }, '›'));
-    const currentPreview = voicePreviewButton('Met effect', () => ({ ...c }));
-    currentPreview.disabled = c.fx === 'none';
+    const currentPreview = voicePreviewButton('Met effect', () => ({ ...c }), () => trackOf(c));
+    currentPreview.disabled = c.fx === 'none' && (!trackOf(c)?.fx || trackOf(c).fx === 'none');
     fxCard.append(fxSelect, h('div', { class: 'hint' }, FX_BY_ID[c.fx]?.desc || 'Kies een effect voor deze clip.'),
       h('div', { class: 'fx-compare' }, voicePreviewButton('Origineel', () => ({ ...c, fx: 'none' })), currentPreview));
     if (c.fx !== 'none') {
       fxCard.append(slider({ label: 'Sterkte', min: 0, max: 1, step: 0.05, value: c.fxAmount ?? 1, fmt: (v) => Math.round(v * 100) + '%', apply: (v) => each((x) => (x.fxAmount = v)) }),
         h('button', { class: 'btn btn-sm btn-ghost', id: 'fx-reset-btn', onclick: () => mutate(() => each((clip) => { clip.fx = 'none'; clip.fxAmount = 1; })) }, 'Effect verwijderen'));
     }
-    if (c.fx !== 'none') fxCard.append(h('button', { class: 'btn btn-sm btn-ghost', id: 'fx-track-btn', onclick: () => {
-      const tracks = new Set(list.map((x) => x.trackId));
-      mutate(() => tl.clips.forEach((x) => { if (tracks.has(x.trackId)) { x.fx = c.fx; x.fxAmount = c.fxAmount; } }));
-      toast(`"${FX_BY_ID[c.fx]?.name}" toegepast op het hele spoor`, 'ok');
-    } }, 'Toepassen op hele spoor'));
     inspector.append(fxCard);
+    const track = trackOf(c);
+    if (track) {
+      const trackPreset = FX_BY_ID[track.fx] || FX_BY_ID.none;
+      const trackFxCard = h('div', { class: 'insp-card voice-effect-card' },
+        h('div', { class: 'voice-effect-heading' }, h('h6', {}, 'Spooreffect'), h('span', {}, track.name)),
+        h('button', { class: 'fx-picker-trigger', id: 'fx-track-btn', type: 'button', 'aria-label': `Stemeffect voor ${track.name}`, 'aria-haspopup': 'dialog', 'aria-expanded': 'false', 'aria-controls': 'fx-picker-popup', onclick: (e) => openFxPicker(e.currentTarget, tl.clips.filter(clip => clip.trackId === track.id), { track }) },
+          h('span', { class: 'fx-choice-icon', 'aria-hidden': 'true' }, trackPreset.emoji),
+          h('span', { class: 'fx-choice-text' }, h('b', {}, trackPreset.name), h('span', {}, 'Effect kiezen voor hele spoor')),
+          h('span', { class: 'fx-picker-chevron', 'aria-hidden': 'true' }, '›')),
+        h('div', { class: 'hint' }, 'Geldt voor alle huidige en nieuwe clips op dit spoor.'));
+      if (track.fx && track.fx !== 'none') trackFxCard.append(
+        slider({ label: 'Sterkte spooreffect', min: 0, max: 1, step: 0.05, value: track.fxAmount ?? 1, fmt: v => Math.round(v * 100) + '%', apply: v => { track.fxAmount = v; } }),
+        h('button', { class: 'btn btn-sm btn-ghost', id: 'track-fx-remove-btn', onclick: () => mutate(() => { track.fx = 'none'; track.fxAmount = 1; }) }, 'Spooreffect verwijderen'));
+      inspector.append(trackFxCard);
+    }
     const startInput = h('input', { class: 'input', type: 'number', min: 0, step: 0.01, value: c.start.toFixed(2), 'aria-label': 'Starttijd in seconden', onchange: (e) => {
       const value = Number(e.target.value);
       if (e.target.value !== '' && Number.isFinite(value) && value >= 0) mutate(() => { const delta = value - c.start; each((x) => { x.start = Math.max(0, x.start + delta); }); });
@@ -2159,11 +2190,11 @@ function normalize(t) {
   // Replace the old untouched starter layout; preserve all edited projects.
   const oldStarter = ['t_voice', 't_sfx', 't_music'];
   const oldNames = ['Stem', 'Sound effects', 'Muziek / extra'];
-  if (!t.clips?.length && t.tracks.length === 3 && t.tracks.every((track, i) => track.id === oldStarter[i] && track.name === oldNames[i] && track.gain === (i === 2 ? 0.8 : 1) && !track.mute && !track.solo)) return { ...d, zoom: t.zoom || d.zoom };
+  if (!t.clips?.length && t.tracks.length === 3 && t.tracks.every((track, i) => track.id === oldStarter[i] && track.name === oldNames[i] && track.gain === (i === 2 ? 0.8 : 1) && !track.mute && !track.solo && !track.glitch && (!track.fx || track.fx === 'none'))) return { ...d, zoom: t.zoom || d.zoom };
   return {
     ...d,
     ...t,
-    tracks: t.tracks.map((tr) => ({ glitch: false, ...tr, glitch: Boolean(tr.glitch) })),
+    tracks: t.tracks.map((tr) => ({ glitch: false, fx: 'none', fxAmount: 1, ...tr, glitch: Boolean(tr.glitch) })),
     clips: (t.clips || []).map((c) => ({ ...clipDefaults(), ...c })),
   };
 }
