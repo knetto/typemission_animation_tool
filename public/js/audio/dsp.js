@@ -181,10 +181,16 @@ export function dropouts(x, sr, { rate = 1.2, minLen = 0.03, maxLen = 0.18, seed
 export function stutter(x, sr, { rate = 0.8, seed = 3 } = {}) {
   const y = x.slice(), r = rng(seed), count = Math.floor((x.length / sr) * rate);
   for (let k = 0; k < count; k++) {
-    const s = Math.floor(r() * (x.length - sr * 0.3));
-    const slice = Math.floor((0.03 + r() * 0.05) * sr), reps = 2 + Math.floor(r() * 3);
-    for (let rep = 1; rep <= reps; rep++)
-      for (let i = 0; i < slice && s + rep * slice + i < y.length; i++) y[s + rep * slice + i] = x[s + i];
+    const slice = Math.max(1, Math.min(Math.floor((0.03 + r() * 0.05) * sr), Math.floor(x.length / 4)));
+    const s = Math.floor(r() * Math.max(1, x.length - slice * 4)), reps = 2 + Math.floor(r() * 3);
+    const edge = Math.max(1, Math.min(Math.round(sr * 0.003), Math.floor(slice / 4)));
+    for (let rep = 1; rep <= reps; rep++) {
+      for (let i = 0; i < slice && s + rep * slice + i < y.length; i++) {
+        const at = s + rep * slice + i;
+        const blend = Math.min(1, i / edge, (slice - 1 - i) / edge);
+        y[at] = y[at] * (1 - blend) + x[s + i] * blend;
+      }
+    }
   }
   return y;
 }

@@ -65,18 +65,19 @@ Exporteer elk ontwerp als **PNG** of **JPG**, op standaardresolutie of extra sch
   - <kbd>Ctrl</kbd> + <kbd>Scroll</kbd>: Tijdlijn in- en uitzoomen
 
 ### 3. 🎭 Stemeffecten (Voice FX)
-Selecteer een clip en kies uit 27 effecten plus de originele stem. Kies eerst een klank, vergelijk **Origineel** en **Met effect** op de eerste zes seconden van je eigen clip, stel de **Sterkte** in en klik op **Toepassen**. Annuleren verandert je clip niet.
+Selecteer een clip en kies uit 34 effecten plus de originele stem. Kies eerst een klank, vergelijk **Origineel** en **Met effect** op de eerste zes seconden van je eigen clip, stel de **Sterkte** in en klik op **Toepassen**. Annuleren verandert je clip niet.
 - **Effect op een heel spoor**: Klik op **FX · Stemeffect kiezen** onder de spoornaam, of open **Spooreffect** in de clipinstellingen. Kies een klank en sterkte en klik op **Toepassen op hele spoor**. Alle clips op dat spoor krijgen het effect, ook nieuwe of verplaatste voice lines. Het effect werkt op de gezamenlijke audio van het spoor en wordt meegenomen bij afspelen, voorvertonen en exporteren. Je kunt het later aanpassen, verwijderen of ongedaan maken. Clipeffecten blijven aanvullend actief.
 - **Samenvoegen met spooreffecten**: Binnen één spoor blijft het spooreffect apart instelbaar. Een selectie uit meerdere sporen wordt inclusief hun effecten samengevoegd op een nieuw spoor, zodat effecten niet dubbel worden toegepast.
 - De ruime effectenbibliotheek opent als een gecentreerd dialoogvenster: links zoek je en blader je door klanken; rechts staan de geselecteerde klank, sterkte en luistervoorbeelden. De keuze wordt pas opgeslagen na toepassen.
 - **Basis**: Originele stem, Studio / helder en Presentator / warm.
 - **Radio & Portofoon**: Digitale portofoon, Oude AM-radio, FM-radio / omroep, Meldkamer, Walkie-talkie (met korte ruis & eindpiep), Militaire veldradio, Beschadigde radio en Subtiele radio.
 - **Telefoon**: Normaal mobiel gesprek, HD / modern mobiel, Mobiel jaren 90, Speakerstand, Voicemail, Klassieke vaste lijn, Vintage draaitelefoon, Slechte ontvangst en Subtiele telefoon.
-- **Karakter**: Robot (ringmodulator comb-filter), Computer / AI, Alien, Diepe stem, Hoge stem, Spion-versleuteld (glitchy data-encryptie).
+- **Robot**: Metaal, Bunker / analoog, AI / android, Vocoder, Titan, Kleine droid, 8-bit arcade, Collectief en Defect / glitch. De vocoder gebruikt de klankbanden van je spraak om een nieuwe, vaste synthtoon te vormen; Titan klinkt laag en donker, de droid hoog en helder, het collectief gebruikt een akkoord en arcade een grove blokgolfstem. Medeklinkers blijven deels behouden voor verstaanbaarheid.
+- **Karakter**: Alien, Diepe stem, Hoge stem, Spion-versleuteld (ringmodulatie en signaalstoringen).
 - **Ruimte**: Echo (delay met feedback), Galm / Hal (reverb).
 - Pas direct toe op een enkele clip of met één klik op het **hele spoor**.
 - **Vergelijken en herstellen**: Voorbeluister ook vanuit de clipinstellingen; verwijder het effect met één knop. Toepassen en verwijderen ondersteunen ongedaan maken en opnieuw.
-- **Audioverwerking**: Afgestemde frequentiebanden, zachte compressie, oversampled verzadiging, spraakvolgende lijnruis en volumevergelijking met ruimte voor pieken. Bestaande preset-ID's blijven beschikbaar voor opgeslagen projecten.
+- **Audioverwerking**: Afzonderlijk afgestemde frequentiebanden, compressie, oversampled verzadiging, vocoders met maximaal 28 klankbanden, spraakvolgende lijnruis en volumevergelijking met ruimte voor pieken. AM-radio heeft banddrift, speakerstand meerdere korte kamerreflecties, voicemail een doffe opnameklank en slechte ontvangst hoorbare haperingen. De halgalm bevat vroege reflecties en een langere diffuse staart. De sterkteknop mengt de in volume afgestemde effectstem; 0% geeft de originele samples. Bestaande preset-ID's blijven beschikbaar voor opgeslagen projecten.
 
 De telefoonklanken zijn simulaties; ze implementeren geen mobiele spraakcodec. De klassieke en HD-varianten gebruiken verschillende frequentiebanden, geïnspireerd door het onderscheid tussen conventionele en breedbandtelefonie in [ITU-T P.341](https://www.itu.int/epublications/publication/itu-t-p-341-2011-03-transmission-characteristics-for-wideband-digital-loudspeaking-and-hands-free-telephony-terminals). Offline filters, compressie en verzadiging gebruiken de [Web Audio API](https://www.w3.org/TR/webaudio-1.0/).
 

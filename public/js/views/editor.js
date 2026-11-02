@@ -1957,7 +1957,7 @@ export async function mount(root, { id }) {
     const draftStatus = h('span', { class: 'fx-draft-status', 'aria-live': 'polite' });
     const strength = h('input', { type: 'range', min: 0, max: 1, step: 0.05, value: draftAmount, 'aria-label': 'Sterkte van het voorbeeld' });
     const strengthValue = h('output');
-    const originalPreview = voicePreviewButton(track ? 'Zonder spooreffect' : 'Origineel', () => ({ ...previewClip, ...(track ? {} : { fx: 'none' }) }), () => track ? { ...track, fx: 'none' } : null);
+    const originalPreview = voicePreviewButton(track ? 'Spoor-FX uit' : 'Origineel', () => ({ ...previewClip, ...(track ? {} : { fx: 'none' }) }), () => track ? { ...track, fx: 'none' } : null);
     const effectPreview = voicePreviewButton('Met effect', () => ({ ...previewClip, ...(track ? {} : { fx: draftFx, fxAmount: draftAmount }) }), () => track ? { ...track, fx: draftFx, fxAmount: draftAmount } : null);
     originalPreview.disabled = !previewClip;
     originalPreview.dataset.unavailable = String(!previewClip);
