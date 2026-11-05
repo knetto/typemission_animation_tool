@@ -120,27 +120,19 @@ export const UNITY_CONTENT_MODES = {
     desc: 'De losse grijze toets met letter, het indruk-effect én de sticker die eroverheen plakt',
   },
   full_board: {
-    name: 'Hele toetsenbord',
+    name: 'Hele Toetsenbord (1920×1080)',
     desc: 'Het hele toetsenbord op een transparante achtergrond',
   },
 };
 
 export const UNITY_TARGET_SCOPES = {
-  used_colors: {
-    name: 'Benodigde kleuren (geselecteerde toetsen)',
-    desc: 'Alleen de kleuren en combinaties die je selectie gebruikt, zonder dubbele stickers.',
-  },
   finger_colors: {
-    name: 'Alle 6 vingerkleuren',
-    desc: 'Elke vingerkleur voor de gekozen toetsformaten. Brede toetsen behouden hun echte verhoudingen.',
-  },
-  current_color: {
-    name: 'Alleen deze kleur (voorbeeldtoets)',
-    desc: 'Alleen de vingerkleur van de huidige voorbeeldtoets, voor de gekozen formaten.',
+    name: '6 Vingerkleuren (Pink t/m Duim)',
+    desc: '6 universele 1u-stickers in de 6 vingerkleuren — herbruikbaar op elke toets in Unity',
   },
   white_tintable: {
-    name: 'Witte stickers (kleuren in Unity)',
-    desc: 'Een witte sticker per gekozen formaat, te kleuren via Image.color / SpriteRenderer.color in Unity.',
+    name: '1 Witte Master-Sprite (Tintable)',
+    desc: '1 witte sticker met schaduw/glans/sparkles die je in Unity via Image.color / SpriteRenderer.color kleurt',
   },
   current_key: {
     name: 'Huidige voorbeeldtoets (1)',
@@ -152,37 +144,7 @@ export const UNITY_TARGET_SCOPES = {
   },
 };
 
-export const UNITY_SIZE_SCOPES = {
-  used_sizes: { name: 'Benodigde formaten (selectie)', desc: 'De breedtes en vormen van je geselecteerde toetsen.' },
-  all_sizes: { name: 'Alle toetsformaten in deze indeling', desc: 'Inclusief brede toetsen, spatie en de echte Enter-vorm.' },
-  current_size: { name: 'Alleen dit formaat (voorbeeldtoets)', desc: 'Alleen de breedte en vorm van de huidige voorbeeldtoets.' },
-  standard_size: { name: 'Alleen standaardtoets (1u)', desc: 'Een normale vierkante toets.' },
-};
-
-export function unityKeySizeId(key) {
-  return key.isoEnter ? `${key.w}u_iso_${key.wBottom}u` : `${key.w}u`;
-}
-
-export function normalizeUnityExportSettings(value = {}) {
-  if (!value || typeof value !== 'object') value = {};
-  return {
-    format: Object.hasOwn(UNITY_EXPORT_FORMATS, value.format) ? value.format : 'spritesheet_zip',
-    contentMode: Object.hasOwn(UNITY_CONTENT_MODES, value.contentMode) ? value.contentMode : 'sticker_only',
-    targetScope: Object.hasOwn(UNITY_TARGET_SCOPES, value.targetScope) ? value.targetScope : 'used_colors',
-    sizeScope: Object.hasOwn(UNITY_SIZE_SCOPES, value.sizeScope) ? value.sizeScope : 'used_sizes',
-    cellSize: [256, 384, 512].includes(value.cellSize) ? value.cellSize : 256,
-    fps: [24, 30, 60].includes(value.fps) ? value.fps : 30,
-    trimDelays: value.trimDelays !== false,
-    includeBurst: value.includeBurst !== false,
-    includePress: value.includePress !== false,
-  };
-}
-
 export const UNITY_EXPORT_FORMATS = {
-  spritesheet_audio_zip: {
-    name: 'Sprite Sheet + Audio (.zip)',
-    desc: 'Alleen de transparante spritesheet-PNG(s) en WAV-audio. Geen scripts, README of andere extra bestanden.',
-  },
   spritesheet_zip: {
     name: 'Sprite Sheet + Audio + C# (.zip)',
     desc: 'Transparante Sprite Sheet grid-PNG(s) + sticker_sfx.wav + kant-en-klaar StickerSpriteAnimator.cs',
@@ -730,7 +692,6 @@ export function normalizeKeyboardOpts(opts = {}) {
     showLaneGuide: hasV3 ? opts.showLaneGuide === true : false, // default false: highlight niet de hele vingersectie
     showKeyBadge: hasV2 ? opts.showKeyBadge === true : false, // default false: clean 1-op-1 canvas zonder badge bovenin
     cumulativeStickers: opts.cumulativeStickers === true, // default false: elke export toont 1 toets die geplakt wordt
-    unityExport: normalizeUnityExportSettings(opts.unityExport),
     sounds: opts.sounds !== false,
     volume: Number.isFinite(opts.volume) ? Math.max(0, Math.min(1, Number(opts.volume))) : 0.75,
   };
@@ -846,7 +807,7 @@ export function keyboardSchedule(options = {}) {
 
 // Deterministic sound synthesis for a key's sticker application:
 // 1. Soft focus ping
-// 2. One continuous, softly filtered adhesive sweep, following the peel motion
+// 2. Crisp sticky adhesive micro-tacks (no wind/paper whoosh)
 // 3. Juicy sticky seal pop + tactile keycap press
 // 4. Happy high sparkling "pling!" chime
 export function keyboardSoundtrack(schedule, options = {}, sampleRate = 48000) {
@@ -862,6 +823,30 @@ export function keyboardSoundtrack(schedule, options = {}, sampleRate = 48000) {
     return seed / 2147483648 - 1;
   };
 
+  // Helper: discrete sticky adhesive tack (upward pitch-chirp droplet + micro-snap, zero wind noise)
+  const addStickyTack = (atSample, amp, baseFreq, chirpMult = 1.58, decay = 520) => {
+    const len = Math.min(Math.round(0.012 * sampleRate), totalSamples - atSample);
+    let phase1 = 0;
+    let phase2 = 0;
+    for (let k = 0; k < len; k++) {
+      if (atSample + k < 0) continue;
+      const t = k / sampleRate;
+      // Fast upward pitch bend gives the unmistakable "tacky/sticky glue" pop character
+      const chirp = 1 + (chirpMult - 1) * (1 - Math.exp(-t * 950));
+      const f1 = baseFreq * chirp;
+      const f2 = baseFreq * 2.15 * chirp;
+      phase1 += (2 * Math.PI * f1) / sampleRate;
+      phase2 += (2 * Math.PI * f2) / sampleRate;
+
+      const attack = Math.min(1, k / (sampleRate * 0.0004));
+      const env = attack * Math.exp(-t * decay);
+      // Tiny 0.9ms initial adhesive snap transient
+      const snap = Math.exp(-t * 2400) * (rand() * 0.45 + Math.sin(2 * Math.PI * 3400 * t) * 0.55);
+      const body = Math.sin(phase1) * 0.68 + Math.sin(phase2) * 0.32;
+      pcm[atSample + k] += (body * env + snap * 0.42) * amp * vol;
+    }
+  };
+
   // 1. Soft cheerful focus ping when target key highlights (focusStart)
   {
     const start = Math.round(schedule.focusStart * sampleRate);
@@ -874,35 +859,40 @@ export function keyboardSoundtrack(schedule, options = {}, sampleRate = 48000) {
     }
   }
 
-  // 2. One unbroken adhesive sweep with a single swell and fade. Keep filter
-  // state continuous across the entire peel: no grains, repeated attacks or gaps.
+  // 2. Sticky adhesive bonding tacks as the sticker rolls onto the keycap (peelStart -> peelEnd)
+  // Uses discrete tacky micro-pops with silent gaps between them (no continuous wind/paper hiss)
   {
     const start = Math.round(schedule.peelStart * sampleRate);
-    const dur = schedule.peelEnd - schedule.peelStart;
+    const dur = Math.max(0.15, schedule.peelEnd - schedule.peelStart);
     const len = Math.round(dur * sampleRate);
-    let textureSeed = 90421;
-    const textureNoise = () => {
-      textureSeed = (Math.imul(textureSeed, 1664525) + 1013904223) >>> 0;
-      return textureSeed / 2147483648 - 1;
-    };
-    const lowpass = (hz) => 1 - Math.exp(-2 * Math.PI * hz / sampleRate);
-    let soft = 0, smooth = 0, body = 0, liftPhase = 0;
-    const softRate = lowpass(2800), smoothRate = lowpass(1900), bodyRate = lowpass(300);
-    for (let i = 0; i < len && start + i < totalSamples; i++) {
-      soft += softRate * (textureNoise() - soft);
-      smooth += smoothRate * (soft - smooth);
-      body += bodyRate * (smooth - body);
-      const p = i / Math.max(1, len - 1);
-      // A broad envelope lets the sound read as one gesture as the sticker
-      // rolls down, then eases into the existing seal and completion pling.
-      const envelope = Math.pow(Math.sin(Math.PI * p), 1.3);
-      // A quiet E5-to-B5 lift adds a cheerful, higher character in the same
-      // harmony as the pling, sharing the sweep's one continuous envelope.
-      const lift = p * p * (3 - 2 * p);
-      const liftHz = 659.25 * Math.pow(987.77 / 659.25, lift);
-      liftPhase += (2 * Math.PI * liftHz) / sampleRate;
-      const brightTone = Math.sin(liftPhase) * 0.035;
-      pcm[start + i] += ((smooth - body) * 0.36 + brightTone) * envelope * vol;
+
+    // Initial sticky corner catch when adhesive first grabs the keycap edge
+    addStickyTack(Math.max(0, start - Math.round(0.010 * sampleRate)), 0.34, 780, 1.65, 460);
+    addStickyTack(start, 0.42, 1080, 1.72, 490);
+    addStickyTack(start + Math.round(0.006 * sampleRate), 0.28, 1520, 1.55, 580);
+
+    // Granular zipper of sticky glue micro-pops as the sticker adheres across the surface
+    let cursor = Math.round(0.015 * sampleRate);
+    while (cursor < len) {
+      const p = cursor / len;
+      // Pressure curve: strongest in the middle and toward the final seal
+      const contour = Math.sin(p * Math.PI) * (0.55 + 0.45 * p);
+      // Rising pitch center as the remaining un-stuck area gets smaller (like sticking tape down)
+      const baseFreq = 720 + 980 * Math.pow(p, 1.15) + (rand() * 190);
+      const amp = (0.20 + 0.18 * Math.abs(rand())) * contour;
+      const decay = 480 + Math.abs(rand()) * 260;
+
+      addStickyTack(start + cursor, amp, baseFreq, 1.55 + 0.22 * p, decay);
+
+      // Occasional double micro-tack (two adhesive filaments snapping right after each other)
+      if (rand() > 0.25) {
+        const subOffset = Math.round((0.0022 + Math.abs(rand()) * 0.0028) * sampleRate);
+        addStickyTack(start + cursor + subOffset, amp * 0.68, baseFreq * 1.28, 1.62, decay * 1.15);
+      }
+
+      // Irregular spacing between 7ms and 18ms so it sounds unmistakably sticky & organic
+      const gapSec = 0.007 + Math.abs(rand()) * 0.011 * (1 - 0.35 * p);
+      cursor += Math.max(12, Math.round(gapSec * sampleRate));
     }
   }
 

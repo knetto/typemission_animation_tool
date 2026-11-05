@@ -12,8 +12,6 @@ import {
   MASK_MODES,
   UNITY_CONTENT_MODES,
   UNITY_TARGET_SCOPES,
-  UNITY_SIZE_SCOPES,
-  normalizeUnityExportSettings,
   UNITY_EXPORT_FORMATS,
   KEYBOARD_LAYOUTS,
   getLayout,
@@ -29,12 +27,7 @@ import {
   resolveUnityTargets,
   renderUnityTargetSprites,
   generateUnityCSharpScript,
-  generateUnityEditorScript,
   generateUnityReadme,
-  unityClipTiming,
-  unityFrameTime,
-  unityFrameSize,
-  sliceUnityAudio,
 } from '../keyboard/unity-export.js';
 import { renderCanvasExport, renderCanvasExportMov, exportSupported } from '../export.js';
 import { ensureFonts, logoSvg } from '../scenes/renderer.js';
@@ -47,32 +40,15 @@ export async function mount(root, { id, project, exportingView = false }) {
   let exports = project.exports || [];
   let scene = null, destroyed = false, raf = 0, playAllMode = false;
   let exporting = false, exportAbort = null, quality = '1080', fps = 30, exportScope = 'all';
-  let unityFormat = opts.unityExport.format,
-    unityContentMode = opts.unityExport.contentMode,
-    unityTargetScope = opts.unityExport.targetScope,
-    unitySizeScope = opts.unityExport.sizeScope,
-    unityCellSize = opts.unityExport.cellSize,
-    unityFps = opts.unityExport.fps,
-    unityTrimDelays = opts.unityExport.trimDelays,
-    unityIncludeBurst = opts.unityExport.includeBurst,
-    unityIncludePress = opts.unityExport.includePress,
+  let unityFormat = 'spritesheet_zip',
+    unityContentMode = 'sticker_only',
+    unityTargetScope = 'finger_colors',
+    unityCellSize = 256,
+    unityFps = 30,
+    unityTrimDelays = true,
+    unityIncludeBurst = true,
+    unityIncludePress = true,
     unityPreviewIsolated = false;
-  let unityPreviewSlug = '';
-
-  function getUnityTargets() {
-    return resolveUnityTargets(opts, unityTargetScope, { sizeScope: unitySizeScope, contentMode: unityContentMode });
-  }
-
-  function unitySettingsChanged() {
-    opts.unityExport = {
-      format: unityFormat, contentMode: unityContentMode, targetScope: unityTargetScope,
-      sizeScope: unitySizeScope, cellSize: unityCellSize, fps: unityFps,
-      trimDelays: unityTrimDelays, includeBurst: unityIncludeBurst, includePress: unityIncludePress,
-    };
-    persist();
-    if (unityPreviewIsolated) rebuildScene(false);
-    paintSettings();
-  }
   let bgImageEl = null, loadedBgUrl = '';
 
   function syncBgImage() {
@@ -117,7 +93,7 @@ export async function mount(root, { id, project, exportingView = false }) {
     };
     status.textContent = 'Opslaan…';
     status.classList.add('saving');
-    const task = saveQueue.catch(() => {}).then(() => api.updateProject(id, payload));
+    const task = saveQueue.catch(() => { }).then(() => api.updateProject(id, payload));
     saveQueue = task;
     task.then(
       () => {
@@ -190,7 +166,6 @@ export async function mount(root, { id, project, exportingView = false }) {
   );
 
   const canvas = h('canvas', { width: 1920, height: 1080, id: 'kb-canvas', 'aria-label': 'Sticker animatie voorbeeld' });
-  canvas.style.objectFit = 'contain';
   const prevKeyBtn = h('button', { class: 'btn btn-sm btn-ghost', title: 'Vorige geselecteerde toets', onclick: () => stepPreviewKey(-1) }, '◀ Vorige');
   const playBtn = h('button', { class: 'btn btn-sm btn-primary', id: 'kb-play-btn', onclick: () => togglePlay(false) }, icon('play'), 'Speel toets');
   const playAllBtn = h('button', { class: 'btn btn-sm', id: 'kb-play-all-btn', title: 'Speel alle geselecteerde toetsen achter elkaar af', onclick: () => togglePlay(true) }, icon('film'), 'Speel selectie');
@@ -226,7 +201,7 @@ export async function mount(root, { id, project, exportingView = false }) {
   // Right panel: Animation settings & Batch Export
   const settingsBody = h('div', { class: 'panel-body', id: 'kb-settings' });
   const right = h('aside', { class: 'panel right file-settings-panel kb-settings-panel', 'aria-label': 'Sticker & Export instellingen' },
-    h('div', { class: 'panel-heading' }, icon(exportingView ? 'download' : 'edit'), exportingView ? 'Exportinstellingen' : 'Sticker-animatie'),
+    h('div', { class: 'panel-heading' }, icon(exportingView ? 'download' : 'edit'), exportingView ? 'Batch Export (MP4 per toets)' : 'Sticker-animatie'),
     settingsBody
   );
 
@@ -234,7 +209,7 @@ export async function mount(root, { id, project, exportingView = false }) {
     ...(exportingView ? [center, right] : [left, center, right])
   );
   root.append(h('div', { class: 'editor file-editor kb-editor' }, header, layout));
-  const disposePanels = exportingView ? () => {} : initEditorPanels(layout, left, center, right);
+  const disposePanels = exportingView ? () => { } : initEditorPanels(layout, left, center, right);
 
   const expButton = h('button', { class: 'btn btn-primary', id: 'start-export-btn', onclick: startExport });
   const expStatus = h('div', { class: 'hint mono', id: 'exp-status', role: 'status', hidden: true });
@@ -310,14 +285,12 @@ export async function mount(root, { id, project, exportingView = false }) {
   }
 
   function setPreviewKey(keyId, autoPlay = true) {
-    if (!keyId || exporting) return;
+    if (!keyId) return;
     opts.previewKey = keyId;
-    unityPreviewSlug = '';
     persist();
     paintKeyboardGrid();
     paintSelectedChips();
     rebuildScene(false);
-    paintSettings();
     if (autoPlay) startPlay(false);
   }
 
@@ -344,37 +317,23 @@ export async function mount(root, { id, project, exportingView = false }) {
       unityPreviewIsolated && unityContentMode === 'full_board'
         ? { ...opts, bgMode: 'transparent' }
         : opts;
-    const targets = unityPreviewIsolated ? getUnityTargets() : [];
-    const target = targets.find((t) => t.slug === unityPreviewSlug) || targets.find((t) => t.keyId === keyId) || targets[0];
-    if (target) unityPreviewSlug = target.slug;
-    const rendered = createKeyboardScene(canvas, target?.keyId || keyId, previewOpts, {
-      preStickeredIds: getPreStickeredIdsFor(target?.keyId || keyId),
+    const colorOverride =
+      unityPreviewIsolated && unityTargetScope === 'white_tintable' ? '#ffffff' : null;
+    return createKeyboardScene(canvas, keyId, previewOpts, {
+      preStickeredIds: getPreStickeredIdsFor(keyId),
       bgImage: bgImageEl,
       spriteMode,
-      colorOverride: target?.colorOverride || null,
+      colorOverride,
       includeBurst: unityPreviewIsolated ? unityIncludeBurst : true,
       includePress: unityPreviewIsolated ? unityIncludePress : true,
     });
-    const size = unityPreviewIsolated ? unityFrameSize(rendered.spriteBox, unityContentMode, unityCellSize) : { cellWidth: 1920, cellHeight: 1080 };
-    canvas.width = size.cellWidth;
-    canvas.height = size.cellHeight;
-    if (!unityPreviewIsolated) return rendered;
-    const timing = unityClipTiming(rendered.schedule, { contentMode: unityContentMode, trimStillDelays: unityTrimDelays, fps: unityFps });
-    return {
-      ...rendered,
-      schedule: { ...rendered.schedule, total: timing.duration, peelEnd: rendered.schedule.peelEnd - timing.tStart },
-      soundtrack: sliceUnityAudio(rendered.soundtrack, timing),
-      draw: (t) => rendered.draw(unityFrameTime(timing, Math.min(timing.frameCount - 1, Math.floor(t * unityFps + 1e-7)))),
-    };
   }
 
   function rebuildScene(keepTime = false) {
     const prevT = keepTime ? +scrub.value : 0;
     stopPlay();
-    scene?.dispose();
     scene = buildPreviewScene(opts.previewKey);
     player.load(scene.soundtrack, 0);
-    scrub.step = unityPreviewIsolated ? String(1 / unityFps) : '0.02';
     scrub.max = scene.schedule.total;
     const defaultStartT =
       unityPreviewIsolated && unityContentMode === 'sticker_only'
@@ -388,12 +347,11 @@ export async function mount(root, { id, project, exportingView = false }) {
     if (!scene?.targetKey) return;
     const tk = scene.targetKey;
     const fInfo = FINGERS.find((f) => f.id === tk.finger) || FINGERS[0];
-    const target = unityPreviewIsolated ? getUnityTargets().find((t) => t.slug === unityPreviewSlug) : null;
-    const col = target?.colorOverride || opts.fingerColors[tk.finger] || fInfo.defaultColor;
+    const col = opts.fingerColors[tk.finger] || fInfo.defaultColor;
     activePreviewTitle.replaceChildren(
       h('span', { class: 'kb-dot', style: { background: col } }),
-      h('b', {}, target?.label || `Toets "${tk.label}"`),
-      ...(!target ? [h('span', {}, ` · ${fInfo.name}`)] : [])
+      h('b', {}, `Toets "${tk.label}"`),
+      h('span', {}, ` · ${fInfo.name}`)
     );
   }
 
@@ -497,8 +455,8 @@ export async function mount(root, { id, project, exportingView = false }) {
             'aria-pressed': String(opts.layout === lay.id),
             onclick: () => setLayout(lay.id),
           },
-          h('b', {}, lay.name),
-          h('small', {}, lay.subtitle))
+            h('b', {}, lay.name),
+            h('small', {}, lay.subtitle))
         )
       )
     );
@@ -646,8 +604,8 @@ export async function mount(root, { id, project, exportingView = false }) {
           action();
         },
       },
-      h('span', { class: 'kb-ctx-ico' }, icoNode),
-      h('span', { class: 'kb-ctx-label' }, label));
+        h('span', { class: 'kb-ctx-ico' }, icoNode),
+        h('span', { class: 'kb-ctx-label' }, label));
 
     const menuEl = h('div', {
       class: 'kb-ctx-menu',
@@ -655,69 +613,69 @@ export async function mount(root, { id, project, exportingView = false }) {
       style: { '--fc': col },
       oncontextmenu: (ev) => ev.preventDefault(),
     },
-    h('div', { class: 'kb-ctx-head' },
-      h('span', { class: 'kb-chip-dot', style: { background: col } }),
-      h('b', {}, keyObj.label),
-      h('span', { class: 'kb-ctx-meta' }, fInfo.shortName || fInfo.name)
-    ),
-    h('div', { class: 'kb-ctx-sep' }),
-    item('Speel voorbeeld', icon('play'), () => setPreviewKey(keyId, true)),
-    item(
-      isSelected ? 'Deselecteer' : 'Selecteer',
-      icon(isSelected ? 'trash' : 'check'),
-      () => toggleKeySelection(keyId),
-      { danger: isSelected }
-    ),
-    item('Alleen deze toets', '◎', () => {
-      opts.selectedKeys = [keyId];
-      opts.previewKey = keyId;
-      optionChanged({ playPreview: true });
-    }),
-    isSelected && opts.selectedKeys.length > 1
-      ? h('div', { class: 'kb-ctx-group' },
+      h('div', { class: 'kb-ctx-head' },
+        h('span', { class: 'kb-chip-dot', style: { background: col } }),
+        h('b', {}, keyObj.label),
+        h('span', { class: 'kb-ctx-meta' }, fInfo.shortName || fInfo.name)
+      ),
+      h('div', { class: 'kb-ctx-sep' }),
+      item('Speel voorbeeld', icon('play'), () => setPreviewKey(keyId, true)),
+      item(
+        isSelected ? 'Deselecteer' : 'Selecteer',
+        icon(isSelected ? 'trash' : 'check'),
+        () => toggleKeySelection(keyId),
+        { danger: isSelected }
+      ),
+      item('Alleen deze toets', '◎', () => {
+        opts.selectedKeys = [keyId];
+        opts.previewKey = keyId;
+        optionChanged({ playPreview: true });
+      }),
+      isSelected && opts.selectedKeys.length > 1
+        ? h('div', { class: 'kb-ctx-group' },
           item('Zet vooraan (#1)', '↑', () => insertSelectedKey(selIdx, 0), { disabled: selIdx === 0 }),
           item('Zet achteraan', '↓', () => insertSelectedKey(selIdx, opts.selectedKeys.length), {
             disabled: selIdx === opts.selectedKeys.length - 1,
           })
         )
-      : null,
-    h('div', { class: 'kb-ctx-sep' }),
-    item(
-      allLaneSelected ? 'Deselecteer baan' : 'Selecteer baan',
-      '🖐',
-      () => selectByFilter((k) => k.finger === keyObj.finger, true)
-    ),
-    item(
-      allRowSelected ? `Deselecteer rij ${keyObj.rowIndex + 1}` : `Selecteer rij ${keyObj.rowIndex + 1}`,
-      '↔',
-      () => selectByFilter((k) => k.rowIndex === keyObj.rowIndex, true)
-    ),
-    item('Kleur aanpassen…', icon('edit'), () => {
-      const picker = h('input', {
-        type: 'color',
-        value: col,
-        style: { position: 'fixed', left: `${e.clientX}px`, top: `${e.clientY}px`, opacity: '0', pointerEvents: 'none' },
-        oninput: (ev) => {
-          opts.fingerColors[keyObj.finger] = ev.target.value.toLowerCase();
-          persist();
-          paintLeft();
-          paintKeyboardGrid();
-          paintSelectedChips();
-          rebuildScene(true);
-        },
-        onchange: () => picker.remove(),
-        onblur: () => picker.remove(),
-      });
-      document.body.append(picker);
-      picker.click();
-    }),
-    h('div', { class: 'kb-ctx-sep' }),
-    item(`Exporteer "${keyObj.label}"`, icon('film'), () => {
-      opts.previewKey = keyId;
-      exportScope = 'single';
-      optionChanged({ playPreview: false });
-      startExport();
-    }));
+        : null,
+      h('div', { class: 'kb-ctx-sep' }),
+      item(
+        allLaneSelected ? 'Deselecteer baan' : 'Selecteer baan',
+        '🖐',
+        () => selectByFilter((k) => k.finger === keyObj.finger, true)
+      ),
+      item(
+        allRowSelected ? `Deselecteer rij ${keyObj.rowIndex + 1}` : `Selecteer rij ${keyObj.rowIndex + 1}`,
+        '↔',
+        () => selectByFilter((k) => k.rowIndex === keyObj.rowIndex, true)
+      ),
+      item('Kleur aanpassen…', icon('edit'), () => {
+        const picker = h('input', {
+          type: 'color',
+          value: col,
+          style: { position: 'fixed', left: `${e.clientX}px`, top: `${e.clientY}px`, opacity: '0', pointerEvents: 'none' },
+          oninput: (ev) => {
+            opts.fingerColors[keyObj.finger] = ev.target.value.toLowerCase();
+            persist();
+            paintLeft();
+            paintKeyboardGrid();
+            paintSelectedChips();
+            rebuildScene(true);
+          },
+          onchange: () => picker.remove(),
+          onblur: () => picker.remove(),
+        });
+        document.body.append(picker);
+        picker.click();
+      }),
+      h('div', { class: 'kb-ctx-sep' }),
+      item(`Exporteer "${keyObj.label}"`, icon('film'), () => {
+        opts.previewKey = keyId;
+        exportScope = 'single';
+        optionChanged({ playPreview: false });
+        startExport();
+      }));
 
     document.body.append(menuEl);
     const rect = menuEl.getBoundingClientRect();
@@ -781,24 +739,24 @@ export async function mount(root, { id, project, exportingView = false }) {
               onclick: () => toggleKeySelection(key.id),
               oncontextmenu: (e) => openKeyContextMenu(e, key.id),
             },
-            key.isoEnter
-              ? h('span', {
+              key.isoEnter
+                ? h('span', {
                   class: 'kb-iso-shape',
                   'aria-hidden': 'true',
                   html: `<svg viewBox="0 0 60 81" preserveAspectRatio="none"><path d="M6,0 H54 A6,6 0 0 1 60,6 V75 A6,6 0 0 1 54,81 H26 A6,6 0 0 1 20,75 V38 H6 A6,6 0 0 1 0,32 V6 A6,6 0 0 1 6,0 Z"/></svg>`,
                 })
-              : null,
-            key.spyIcon
-              ? h('span', { class: 'kb-key-main kb-key-spy-logo', 'aria-label': 'Spy', html: logoSvg('currentColor') })
-              : h('span', { class: 'kb-key-main' }, displayLabel),
-            isSelected ? h('span', { class: 'kb-key-check', 'aria-hidden': 'true' }, '✓') : null);
+                : null,
+              key.spyIcon
+                ? h('span', { class: 'kb-key-main kb-key-spy-logo', 'aria-label': 'Spy', html: logoSvg('currentColor') })
+                : h('span', { class: 'kb-key-main' }, displayLabel),
+              isSelected ? h('span', { class: 'kb-key-check', 'aria-hidden': 'true' }, '✓') : null);
           }),
           prevRowIso
             ? h('div', {
-                class: 'kb-iso-spacer',
-                style: { '--kw': prevRowIso.wBottom || 1 },
-                'aria-hidden': 'true',
-              })
+              class: 'kb-iso-spacer',
+              style: { '--kw': prevRowIso.wBottom || 1 },
+              'aria-hidden': 'true',
+            })
             : null
         );
       })
@@ -992,9 +950,9 @@ export async function mount(root, { id, project, exportingView = false }) {
                 class: 'kb-chip kb-chip-ghost',
                 style: { '--fc': col },
               },
-              h('i', { class: 'kb-chip-dot', style: { background: col } }),
-              h('b', {}, k.label),
-              ghostBadgeEl);
+                h('i', { class: 'kb-chip-dot', style: { background: col } }),
+                h('b', {}, k.label),
+                ghostBadgeEl);
               document.body.append(ghostEl);
             }
 
@@ -1060,8 +1018,8 @@ export async function mount(root, { id, project, exportingView = false }) {
           window.addEventListener('pointercancel', onPointerUp);
         },
       },
-      h('i', { class: 'kb-chip-dot', style: { background: col } }),
-      h('b', {}, k.label));
+        h('i', { class: 'kb-chip-dot', style: { background: col } }),
+        h('b', {}, k.label));
       selectedChipsWrap.append(chip);
     });
   }
@@ -1100,8 +1058,8 @@ export async function mount(root, { id, project, exportingView = false }) {
               optionChanged({ playPreview: true });
             },
           },
-          h('b', {}, st.name),
-          h('small', {}, st.desc))
+            h('b', {}, st.name),
+            h('small', {}, st.desc))
         )
       ),
       h('label', { class: 'field' },
@@ -1114,9 +1072,9 @@ export async function mount(root, { id, project, exportingView = false }) {
             optionChanged({ keepTime: true });
           },
         },
-        ...Object.entries(KEYBOARD_THEMES).map(([k, th]) =>
-          h('option', { value: k, selected: opts.theme === k }, th.name)
-        ))
+          ...Object.entries(KEYBOARD_THEMES).map(([k, th]) =>
+            h('option', { value: k, selected: opts.theme === k }, th.name)
+          ))
       ),
       h('label', { class: 'field' },
         'Achtergrond achter toetsenbord',
@@ -1129,116 +1087,116 @@ export async function mount(root, { id, project, exportingView = false }) {
             optionChanged({ keepTime: true });
           },
         },
-        ...Object.entries(BACKGROUND_MODES).map(([k, bm]) =>
-          h('option', { value: k, selected: opts.bgMode === k }, `${bm.name} — ${bm.desc}`)
-        ))
+          ...Object.entries(BACKGROUND_MODES).map(([k, bm]) =>
+            h('option', { value: k, selected: opts.bgMode === k }, `${bm.name} — ${bm.desc}`)
+          ))
       ),
       opts.bgMode === 'greenscreen'
         ? h('label', { class: 'field' },
-            'Chroma-key kleur',
-            h('div', { class: 'row' },
-              h('input', {
-                type: 'color',
-                value: opts.greenscreenColor || '#00ff00',
-                class: 'kb-color-picker',
-                disabled: exporting,
-                oninput: (e) => {
-                  opts.greenscreenColor = e.target.value.toLowerCase();
-                  persist();
-                  rebuildScene(true);
-                },
-              }),
-              h('button', {
-                type: 'button',
-                class: 'btn btn-sm',
-                disabled: exporting,
-                onclick: () => {
-                  opts.greenscreenColor = '#00ff00';
-                  optionChanged({ keepTime: true });
-                },
-              }, 'Helder groen (#00FF00)'),
-              h('button', {
-                type: 'button',
-                class: 'btn btn-sm',
-                disabled: exporting,
-                onclick: () => {
-                  opts.greenscreenColor = '#00b140';
-                  optionChanged({ keepTime: true });
-                },
-              }, 'Studio groen'),
-              h('button', {
-                type: 'button',
-                class: 'btn btn-sm',
-                disabled: exporting,
-                onclick: () => {
-                  opts.greenscreenColor = '#0047bb';
-                  optionChanged({ keepTime: true });
-                },
-              }, 'Bluescreen')
-            )
+          'Chroma-key kleur',
+          h('div', { class: 'row' },
+            h('input', {
+              type: 'color',
+              value: opts.greenscreenColor || '#00ff00',
+              class: 'kb-color-picker',
+              disabled: exporting,
+              oninput: (e) => {
+                opts.greenscreenColor = e.target.value.toLowerCase();
+                persist();
+                rebuildScene(true);
+              },
+            }),
+            h('button', {
+              type: 'button',
+              class: 'btn btn-sm',
+              disabled: exporting,
+              onclick: () => {
+                opts.greenscreenColor = '#00ff00';
+                optionChanged({ keepTime: true });
+              },
+            }, 'Helder groen (#00FF00)'),
+            h('button', {
+              type: 'button',
+              class: 'btn btn-sm',
+              disabled: exporting,
+              onclick: () => {
+                opts.greenscreenColor = '#00b140';
+                optionChanged({ keepTime: true });
+              },
+            }, 'Studio groen'),
+            h('button', {
+              type: 'button',
+              class: 'btn btn-sm',
+              disabled: exporting,
+              onclick: () => {
+                opts.greenscreenColor = '#0047bb';
+                optionChanged({ keepTime: true });
+              },
+            }, 'Bluescreen')
           )
+        )
         : null,
       opts.bgMode === 'custom' || opts.bgMode === 'masked'
         ? h('label', { class: 'field' },
-            opts.bgMode === 'masked' ? 'Kleur buiten masker' : 'Eigen achtergrondkleur',
-            h('div', { class: 'row' },
-              h('input', {
-                type: 'color',
-                value: opts.bgColor || '#0f172a',
-                class: 'kb-color-picker',
-                disabled: exporting,
-                oninput: (e) => {
-                  opts.bgColor = e.target.value.toLowerCase();
-                  persist();
-                  rebuildScene(true);
-                },
-              }),
-              h('button', {
-                type: 'button',
-                class: 'btn btn-sm',
-                disabled: exporting,
-                onclick: () => {
-                  opts.bgColor = '#000000';
-                  optionChanged({ keepTime: true });
-                },
-              }, 'Zwart'),
-              h('button', {
-                type: 'button',
-                class: 'btn btn-sm',
-                disabled: exporting,
-                onclick: () => {
-                  opts.bgColor = '#ffffff';
-                  optionChanged({ keepTime: true });
-                },
-              }, 'Wit'),
-              h('button', {
-                type: 'button',
-                class: 'btn btn-sm',
-                disabled: exporting,
-                onclick: () => {
-                  opts.bgColor = '#00ff00';
-                  optionChanged({ keepTime: true });
-                },
-              }, 'Groen')
-            )
+          opts.bgMode === 'masked' ? 'Kleur buiten masker' : 'Eigen achtergrondkleur',
+          h('div', { class: 'row' },
+            h('input', {
+              type: 'color',
+              value: opts.bgColor || '#0f172a',
+              class: 'kb-color-picker',
+              disabled: exporting,
+              oninput: (e) => {
+                opts.bgColor = e.target.value.toLowerCase();
+                persist();
+                rebuildScene(true);
+              },
+            }),
+            h('button', {
+              type: 'button',
+              class: 'btn btn-sm',
+              disabled: exporting,
+              onclick: () => {
+                opts.bgColor = '#000000';
+                optionChanged({ keepTime: true });
+              },
+            }, 'Zwart'),
+            h('button', {
+              type: 'button',
+              class: 'btn btn-sm',
+              disabled: exporting,
+              onclick: () => {
+                opts.bgColor = '#ffffff';
+                optionChanged({ keepTime: true });
+              },
+            }, 'Wit'),
+            h('button', {
+              type: 'button',
+              class: 'btn btn-sm',
+              disabled: exporting,
+              onclick: () => {
+                opts.bgColor = '#00ff00';
+                optionChanged({ keepTime: true });
+              },
+            }, 'Groen')
           )
+        )
         : null,
       opts.bgMode === 'masked'
         ? h('label', { class: 'field' },
-            'Masker-vorm (Mask)',
-            h('select', {
-              class: 'select',
-              id: 'kb-mask-mode',
-              disabled: exporting,
-              onchange: (e) => {
-                opts.maskMode = e.target.value;
-                optionChanged({ keepTime: true });
-              },
+          'Masker-vorm (Mask)',
+          h('select', {
+            class: 'select',
+            id: 'kb-mask-mode',
+            disabled: exporting,
+            onchange: (e) => {
+              opts.maskMode = e.target.value;
+              optionChanged({ keepTime: true });
             },
+          },
             ...Object.entries(MASK_MODES).map(([k, mm]) =>
               h('option', { value: k, selected: opts.maskMode === k }, `${mm.name} — ${mm.desc}`)
             ))
-          )
+        )
         : null,
       h('label', { class: 'field' },
         'Toetsenbord-plaat (onder de toetsen)',
@@ -1251,95 +1209,95 @@ export async function mount(root, { id, project, exportingView = false }) {
             optionChanged({ keepTime: true });
           },
         },
-        ...Object.entries(BOARD_MODES).map(([k, bm]) =>
-          h('option', { value: k, selected: opts.boardMode === k }, `${bm.name} — ${bm.desc}`)
-        ))
+          ...Object.entries(BOARD_MODES).map(([k, bm]) =>
+            h('option', { value: k, selected: opts.boardMode === k }, `${bm.name} — ${bm.desc}`)
+          ))
       ),
       opts.boardMode === 'custom'
         ? h('label', { class: 'field' },
-            'Eigen kleur toetsenbord-plaat',
-            h('div', { class: 'row' },
-              h('input', {
-                type: 'color',
-                value: opts.boardColor || '#0d1324',
-                class: 'kb-color-picker',
-                disabled: exporting,
-                oninput: (e) => {
-                  opts.boardColor = e.target.value.toLowerCase();
-                  persist();
-                  rebuildScene(true);
-                },
-              }),
-              h('span', { class: 'mono kb-color-hex' }, (opts.boardColor || '#0d1324').toUpperCase())
-            )
+          'Eigen kleur toetsenbord-plaat',
+          h('div', { class: 'row' },
+            h('input', {
+              type: 'color',
+              value: opts.boardColor || '#0d1324',
+              class: 'kb-color-picker',
+              disabled: exporting,
+              oninput: (e) => {
+                opts.boardColor = e.target.value.toLowerCase();
+                persist();
+                rebuildScene(true);
+              },
+            }),
+            h('span', { class: 'mono kb-color-hex' }, (opts.boardColor || '#0d1324').toUpperCase())
           )
+        )
         : null,
       opts.bgMode === 'image' || opts.bgMode === 'masked' || opts.boardMode === 'image'
         ? h('div', { class: 'field' },
-            h('span', {}, 'Achtergrond- / Masker-afbeelding'),
-            h('div', { class: 'row' },
-              h('button', {
+          h('span', {}, 'Achtergrond- / Masker-afbeelding'),
+          h('div', { class: 'row' },
+            h('button', {
+              type: 'button',
+              class: 'btn btn-sm btn-primary',
+              disabled: exporting,
+              onclick: () => {
+                const fileIn = h('input', {
+                  type: 'file',
+                  accept: 'image/*',
+                  hidden: true,
+                  onchange: async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      const uploaded = await api.uploadImages(id, [file], 'Background');
+                      if (uploaded?.[0]) {
+                        opts.bgImageUrl = fileUrl.image(uploaded[0]);
+                        await syncBgImage();
+                        optionChanged({ keepTime: true });
+                        toast('Achtergrondafbeelding geüpload!', 'ok');
+                      }
+                    } catch (err) {
+                      toast('Upload mislukt: ' + err.message, 'err');
+                    }
+                  },
+                });
+                document.body.append(fileIn);
+                fileIn.click();
+                fileIn.remove();
+              },
+            }, icon('upload'), opts.bgImageUrl ? 'Andere afbeelding kiezen…' : 'Afbeelding uploaden…'),
+            opts.bgImageUrl
+              ? h('button', {
                 type: 'button',
-                class: 'btn btn-sm btn-primary',
+                class: 'btn btn-sm btn-ghost',
                 disabled: exporting,
                 onclick: () => {
-                  const fileIn = h('input', {
-                    type: 'file',
-                    accept: 'image/*',
-                    hidden: true,
-                    onchange: async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      try {
-                        const uploaded = await api.uploadImages(id, [file], 'Background');
-                        if (uploaded?.[0]) {
-                          opts.bgImageUrl = fileUrl.image(uploaded[0]);
-                          await syncBgImage();
-                          optionChanged({ keepTime: true });
-                          toast('Achtergrondafbeelding geüpload!', 'ok');
-                        }
-                      } catch (err) {
-                        toast('Upload mislukt: ' + err.message, 'err');
-                      }
-                    },
-                  });
-                  document.body.append(fileIn);
-                  fileIn.click();
-                  fileIn.remove();
+                  opts.bgImageUrl = '';
+                  bgImageEl = null;
+                  loadedBgUrl = '';
+                  optionChanged({ keepTime: true });
                 },
-              }, icon('upload'), opts.bgImageUrl ? 'Andere afbeelding kiezen…' : 'Afbeelding uploaden…'),
-              opts.bgImageUrl
-                ? h('button', {
-                    type: 'button',
-                    class: 'btn btn-sm btn-ghost',
-                    disabled: exporting,
-                    onclick: () => {
-                      opts.bgImageUrl = '';
-                      bgImageEl = null;
-                      loadedBgUrl = '';
-                      optionChanged({ keepTime: true });
-                    },
-                  }, icon('trash'), 'Verwijder')
-                : null
-            ),
-            opts.bgImageUrl
-              ? h('label', { class: 'field', style: { marginTop: '6px' } },
-                  `Afbeelding dimmen (${Math.round(opts.bgImageDim * 100)}%)`,
-                  h('input', {
-                    type: 'range',
-                    min: 0,
-                    max: 0.85,
-                    step: 0.05,
-                    value: opts.bgImageDim,
-                    disabled: exporting,
-                    onchange: (e) => {
-                      opts.bgImageDim = +e.target.value;
-                      optionChanged({ keepTime: true });
-                    },
-                  })
-                )
+              }, icon('trash'), 'Verwijder')
               : null
-          )
+          ),
+          opts.bgImageUrl
+            ? h('label', { class: 'field', style: { marginTop: '6px' } },
+              `Afbeelding dimmen (${Math.round(opts.bgImageDim * 100)}%)`,
+              h('input', {
+                type: 'range',
+                min: 0,
+                max: 0.85,
+                step: 0.05,
+                value: opts.bgImageDim,
+                disabled: exporting,
+                onchange: (e) => {
+                  opts.bgImageDim = +e.target.value;
+                  optionChanged({ keepTime: true });
+                },
+              })
+            )
+            : null
+        )
         : null,
       h('label', { class: 'field' },
         `Start-vertraging / still frame (${Math.round(opts.startDelay * 1000)} ms · ${opts.startDelay.toFixed(2)}s)`,
@@ -1434,20 +1392,20 @@ export async function mount(root, { id, project, exportingView = false }) {
       toggleControl('Satisfying sticker- & toetsgeluiden', 'sounds', 'kb-sounds'),
       opts.sounds
         ? h('label', { class: 'field' },
-            'Geluidsvolume',
-            h('input', {
-              type: 'range',
-              min: 0,
-              max: 1,
-              step: 0.05,
-              value: opts.volume,
-              disabled: exporting,
-              onchange: (e) => {
-                opts.volume = +e.target.value;
-                optionChanged({ keepTime: true });
-              },
-            })
-          )
+          'Geluidsvolume',
+          h('input', {
+            type: 'range',
+            min: 0,
+            max: 1,
+            step: 0.05,
+            value: opts.volume,
+            disabled: exporting,
+            onchange: (e) => {
+              opts.volume = +e.target.value;
+              optionChanged({ keepTime: true });
+            },
+          })
+        )
         : null
     );
 
@@ -1485,8 +1443,8 @@ export async function mount(root, { id, project, exportingView = false }) {
           disabled: exporting,
           onchange: (e) => { quality = e.target.value; },
         },
-        h('option', { value: '1080', selected: quality === '1080' }, '1080p Full HD (1920×1080)'),
-        h('option', { value: '2160', selected: quality === '2160' }, '4K Ultra HD (3840×2160)'))
+          h('option', { value: '1080', selected: quality === '1080' }, '1080p Full HD (1920×1080)'),
+          h('option', { value: '2160', selected: quality === '2160' }, '4K Ultra HD (3840×2160)'))
       ),
       h('label', { class: 'field' },
         'Framerate',
@@ -1495,8 +1453,8 @@ export async function mount(root, { id, project, exportingView = false }) {
           disabled: exporting,
           onchange: (e) => { fps = +e.target.value; },
         },
-        h('option', { value: 30, selected: fps === 30 }, '30 FPS'),
-        h('option', { value: 60, selected: fps === 60 }, '60 FPS'))
+          h('option', { value: 30, selected: fps === 30 }, '30 FPS'),
+          h('option', { value: 60, selected: fps === 60 }, '60 FPS'))
       ),
       h('p', { class: 'hint' },
         exportScope === 'single'
@@ -1511,17 +1469,15 @@ export async function mount(root, { id, project, exportingView = false }) {
     );
 
     // Unity Sprite & Effect Export Card (multiple options: Sprite Sheet PNG, Frame Sequence ZIP, Transparent WebM/MOV, C# Script)
-    const unityTargets = getUnityTargets();
-    const unityColorCount = new Set(unityTargets.map((target) => target.colorOverride)).size;
-    const unitySizeCount = new Set(unityTargets.map((target) => target.sizeId)).size;
+    const unityTargets = resolveUnityTargets(opts, unityTargetScope);
     const unityBtn = h(
       'button',
       {
         type: 'button',
         class: 'btn btn-primary',
         id: 'start-unity-export-btn',
+        disabled: exporting,
         onclick: startUnityExport,
-        disabled: !exporting && !unityTargets.length,
       },
       icon(exporting ? 'stop' : 'download'),
       exporting
@@ -1536,7 +1492,7 @@ export async function mount(root, { id, project, exportingView = false }) {
       h(
         'p',
         { class: 'hint' },
-        'Kies je kleuren en toetsformaten. Je krijgt elke benodigde animatie op een transparante achtergrond, met de echte vorm en beweging van de toets.'
+        'Exporteer alleen de sticker-afplakanimatie + glans + sparkle-burst op een transparante achtergrond (Sprite Sheet, losse PNG-frames of transparante video) inclusief WAV-geluid en Unity C# script.'
       ),
       h(
         'label',
@@ -1550,7 +1506,7 @@ export async function mount(root, { id, project, exportingView = false }) {
             disabled: exporting,
             onchange: (e) => {
               unityFormat = e.target.value;
-              unitySettingsChanged();
+              paintSettings();
             },
           },
           ...Object.entries(UNITY_EXPORT_FORMATS).map(([k, fmt]) =>
@@ -1571,7 +1527,8 @@ export async function mount(root, { id, project, exportingView = false }) {
             disabled: exporting,
             onchange: (e) => {
               unityContentMode = e.target.value;
-              unitySettingsChanged();
+              if (unityPreviewIsolated) rebuildScene(true);
+              paintSettings();
             },
           },
           ...Object.entries(UNITY_CONTENT_MODES).map(([k, cm]) =>
@@ -1583,7 +1540,7 @@ export async function mount(root, { id, project, exportingView = false }) {
       h(
         'label',
         { class: 'field' },
-        '3. Welke kleuren of toetsen?',
+        '3. Welke variaties exporteren?',
         h(
           'select',
           {
@@ -1592,7 +1549,8 @@ export async function mount(root, { id, project, exportingView = false }) {
             disabled: exporting,
             onchange: (e) => {
               unityTargetScope = e.target.value;
-              unitySettingsChanged();
+              if (unityPreviewIsolated) rebuildScene(true);
+              paintSettings();
             },
           },
           ...Object.entries(UNITY_TARGET_SCOPES).map(([k, ts]) =>
@@ -1605,27 +1563,13 @@ export async function mount(root, { id, project, exportingView = false }) {
         ),
         h('small', { class: 'hint' }, UNITY_TARGET_SCOPES[unityTargetScope]?.desc || '')
       ),
-      ['current_key', 'selected_keys'].includes(unityTargetScope) ? null : h(
-        'label', { class: 'field' }, '4. Welke toetsformaten?',
-        h('select', {
-          class: 'select', id: 'kb-unity-size-scope', disabled: exporting,
-          onchange: (e) => { unitySizeScope = e.target.value; unitySettingsChanged(); },
-        }, ...Object.entries(UNITY_SIZE_SCOPES).map(([value, info]) =>
-          h('option', { value, selected: unitySizeScope === value }, info.name))),
-        h('small', { class: 'hint' }, UNITY_SIZE_SCOPES[unitySizeScope].desc)
-      ),
-      h('div', { class: 'hint', role: 'status', id: 'kb-unity-summary' },
-        unityTargets.length
-          ? `${unityTargets.length} ${unityTargets.length === 1 ? 'animatie' : 'animaties'} · ${unityColorCount} ${unityColorCount === 1 ? 'kleur' : 'kleuren'} · ${unitySizeCount} ${unitySizeCount === 1 ? 'toetsformaat' : 'toetsformaten'}. Elke variant heeft een eigen bestand; brede toetsen behouden hun verhoudingen.`
-          : 'Selecteer eerst toetsen op het toetsenbord, of kies alle kleuren en alle toetsformaten.'
-      ),
       h(
         'div',
         { class: 'row' },
         h(
           'label',
           { class: 'field', style: { flex: 1 } },
-          'Resolutie (inclusief effectruimte)',
+          'Sprite celgrootte (1u)',
           h(
             'select',
             {
@@ -1634,12 +1578,12 @@ export async function mount(root, { id, project, exportingView = false }) {
               disabled: exporting,
               onchange: (e) => {
                 unityCellSize = +e.target.value;
-                unitySettingsChanged();
+                paintSettings();
               },
             },
-            h('option', { value: 256, selected: unityCellSize === 256 }, 'Standaard (1×)'),
-            h('option', { value: 384, selected: unityCellSize === 384 }, 'Scherp (1,5×)'),
-            h('option', { value: 512, selected: unityCellSize === 512 }, 'Extra scherp (2×)')
+            h('option', { value: 256, selected: unityCellSize === 256 }, '256×256 px'),
+            h('option', { value: 384, selected: unityCellSize === 384 }, '384×384 px'),
+            h('option', { value: 512, selected: unityCellSize === 512 }, '512×512 px')
           )
         ),
         h(
@@ -1654,7 +1598,7 @@ export async function mount(root, { id, project, exportingView = false }) {
               disabled: exporting,
               onchange: (e) => {
                 unityFps = +e.target.value;
-                unitySettingsChanged();
+                paintSettings();
               },
             },
             h('option', { value: 24, selected: unityFps === 24 }, '24 FPS'),
@@ -1673,7 +1617,7 @@ export async function mount(root, { id, project, exportingView = false }) {
           disabled: exporting,
           onchange: (e) => {
             unityTrimDelays = e.target.checked;
-            unitySettingsChanged();
+            paintSettings();
           },
         }),
         h('span', { class: 'track' }),
@@ -1689,7 +1633,7 @@ export async function mount(root, { id, project, exportingView = false }) {
           disabled: exporting,
           onchange: (e) => {
             unityIncludeBurst = e.target.checked;
-            unitySettingsChanged();
+            if (unityPreviewIsolated) rebuildScene(true);
           },
         }),
         h('span', { class: 'track' }),
@@ -1705,7 +1649,7 @@ export async function mount(root, { id, project, exportingView = false }) {
           disabled: exporting,
           onchange: (e) => {
             unityIncludePress = e.target.checked;
-            unitySettingsChanged();
+            if (unityPreviewIsolated) rebuildScene(true);
           },
         }),
         h('span', { class: 'track' }),
@@ -1722,32 +1666,11 @@ export async function mount(root, { id, project, exportingView = false }) {
           onchange: (e) => {
             unityPreviewIsolated = e.target.checked;
             rebuildScene(false);
-            paintSettings();
           },
         }),
         h('span', { class: 'track' }),
-        'Toon exact exportvoorbeeld (met gekozen FPS en timing)'
+        '👁️ Toon geïsoleerde transparante Unity Sprite op canvas'
       ),
-      unityPreviewIsolated && unityTargets.length ? h('label', { class: 'field' }, 'Variant in het exportvoorbeeld',
-        h('select', {
-          class: 'select', id: 'kb-unity-preview-target', disabled: exporting,
-          onchange: (e) => { unityPreviewSlug = e.target.value; rebuildScene(false); paintSettings(); },
-        }, ...unityTargets.map((target) => h('option', { value: target.slug, selected: target.slug === unityPreviewSlug }, target.label)))
-      ) : null,
-      unityFormat === 'spritesheet_png' && unityTargets.length > 1
-        ? h('small', { class: 'hint' }, 'Meerdere sheets worden samen als één ZIP gedownload.') : null,
-      h('button', {
-        type: 'button', class: 'btn btn-sm btn-ghost', disabled: exporting,
-        onclick: () => {
-          const defaults = normalizeUnityExportSettings();
-          unityFormat = defaults.format; unityContentMode = defaults.contentMode;
-          unityTargetScope = defaults.targetScope; unitySizeScope = defaults.sizeScope;
-          unityCellSize = defaults.cellSize; unityFps = defaults.fps;
-          unityTrimDelays = defaults.trimDelays; unityIncludeBurst = defaults.includeBurst;
-          unityIncludePress = defaults.includePress;
-          unitySettingsChanged();
-        },
-      }, 'Herstel exportinstellingen'),
       unityBtn
     );
 
@@ -1756,11 +1679,11 @@ export async function mount(root, { id, project, exportingView = false }) {
         h('h6', {}, `📦 Opgeslagen exports (${exports.length})`),
         exports.length > 1
           ? h('button', {
-              type: 'button',
-              class: 'btn btn-sm btn-ghost',
-              disabled: exporting,
-              onclick: downloadAllExports,
-            }, icon('download'), 'Download alles')
+            type: 'button',
+            class: 'btn btn-sm btn-ghost',
+            disabled: exporting,
+            onclick: downloadAllExports,
+          }, icon('download'), 'Download alles')
           : null
       )
     );
@@ -1817,7 +1740,7 @@ export async function mount(root, { id, project, exportingView = false }) {
       exportAbort?.abort();
       return;
     }
-    const targets = getUnityTargets();
+    const targets = resolveUnityTargets(opts, unityTargetScope);
     if (!targets.length) return toast('Geen toetsen of vingerkleuren gevonden om te exporteren', 'err');
 
     stopPlay();
@@ -1850,11 +1773,16 @@ export async function mount(root, { id, project, exportingView = false }) {
             colorOverride: target.colorOverride,
             includeBurst: unityIncludeBurst,
             includePress: unityIncludePress,
-            preStickeredIds: getPreStickeredIdsFor(target.keyId),
           });
-          const frameSize = unityFrameSize(probe.spriteBox, unityContentMode, unityCellSize);
-          const outW = Math.ceil(frameSize.cellWidth / 2) * 2;
-          const outH = Math.ceil(frameSize.cellHeight / 2) * 2;
+          const scale = unityCellSize / 256;
+          const outW =
+            unityContentMode === 'full_board'
+              ? 1920
+              : Math.round((probe.spriteBox.logicalW * scale) / 2) * 2;
+          const outH =
+            unityContentMode === 'full_board'
+              ? 1080
+              : Math.round((probe.spriteBox.logicalH * scale) / 2) * 2;
           probe.dispose();
 
           const outCanvas = document.createElement('canvas');
@@ -1866,19 +1794,14 @@ export async function mount(root, { id, project, exportingView = false }) {
             colorOverride: target.colorOverride,
             includeBurst: unityIncludeBurst,
             includePress: unityIncludePress,
-            preStickeredIds: getPreStickeredIdsFor(target.keyId),
           });
-          const timing = unityClipTiming(rendered.schedule, { contentMode: unityContentMode, trimStillDelays: unityTrimDelays, fps: unityFps });
-          const clipScene = {
-            ...rendered,
-            draw: (t) => rendered.draw(unityFrameTime(timing, Math.min(timing.frameCount - 1, Math.round(t * unityFps)))),
-          };
+
           const result = await renderCanvasExportMov({
             projectId: id,
             canvas: outCanvas,
-            scene: clipScene,
-            soundtrack: sliceUnityAudio(rendered.soundtrack, timing),
-            duration: timing.duration,
+            scene: rendered,
+            soundtrack: rendered.soundtrack,
+            duration: rendered.schedule.total,
             mode: 'keyboard',
             format: vidFormat,
             transparent: true,
@@ -1900,9 +1823,8 @@ export async function mount(root, { id, project, exportingView = false }) {
       }
 
       // Option B: Sprite Sheet PNG(s) and/or PNG Frame Sequences + WAV + Unity C# Script
-      const assetsOnly = unityFormat === 'spritesheet_audio_zip';
       const wantSpriteSheet =
-        assetsOnly || unityFormat === 'spritesheet_zip' || unityFormat === 'both_zip' || unityFormat === 'spritesheet_png';
+        unityFormat === 'spritesheet_zip' || unityFormat === 'both_zip' || unityFormat === 'spritesheet_png';
       const wantFrames = unityFormat === 'frames_zip' || unityFormat === 'both_zip';
 
       const zipEntries = [];
@@ -1924,7 +1846,6 @@ export async function mount(root, { id, project, exportingView = false }) {
           trimStillDelays: unityTrimDelays,
           includeBurst: unityIncludeBurst,
           includePress: unityIncludePress,
-          preStickeredIds: getPreStickeredIdsFor(target.keyId),
           wantSpriteSheet,
           wantFrames,
           signal: exportAbort.signal,
@@ -1933,12 +1854,11 @@ export async function mount(root, { id, project, exportingView = false }) {
           },
         });
 
-        if (exportAbort.signal.aborted) throw new DOMException('Geannuleerd', 'AbortError');
         metaList.push(res.meta);
         if (!sharedWavBlob) sharedWavBlob = res.wavBlob;
 
-        if (unityFormat === 'spritesheet_png' && targets.length === 1 && res.spriteSheetBlob) {
-          triggerBlobDownload(res.spriteSheetBlob, res.meta.filename);
+        if (unityFormat === 'spritesheet_png' && res.spriteSheetBlob) {
+          setTimeout(() => triggerBlobDownload(res.spriteSheetBlob, res.meta.filename), i * 240);
         } else {
           if (res.spriteSheetBlob) {
             zipEntries.push({
@@ -1958,62 +1878,48 @@ export async function mount(root, { id, project, exportingView = false }) {
       }
 
       if (unityFormat === 'spritesheet_png') {
-        if (targets.length > 1) {
-          zipEntries.push({ path: 'unity_import_meta.json', data: JSON.stringify({ animations: metaList }, null, 2) });
-          triggerBlobDownload(await buildZipBlob(zipEntries), 'sticker_spritesheets.zip');
-        }
         expProgress.value = 1;
         toast(`${targets.length} transparante Sprite Sheet PNG('s) gedownload!`, 'ok', 4500);
         return;
       }
 
-      expStatus.textContent = assetsOnly
-        ? 'ZIP samenstellen (Sprite Sheet + WAV)…'
-        : 'Unity .zip pakket samenstellen (Sprite Sheet + WAV + C# script)…';
+      expStatus.textContent = 'Unity .zip pakket samenstellen (Sprite Sheet + WAV + C# script)…';
       expProgress.value = 0.96;
 
       if (sharedWavBlob && opts.sounds !== false) {
         zipEntries.push({ path: 'Audio/sticker_sfx.wav', data: sharedWavBlob });
       }
-      if (!assetsOnly) {
-        zipEntries.push({
-          path: 'Scripts/StickerSpriteAnimator.cs',
-          data: generateUnityCSharpScript(opts, metaList),
-        });
-        zipEntries.push({
-          path: 'Editor/ImportStickerSprites.cs',
-          data: generateUnityEditorScript(metaList, { wantSpriteSheet }),
-        });
-        zipEntries.push({
-          path: 'unity_import_meta.json',
-          data: JSON.stringify(
-            {
-              generator: 'Keyboard Sticker Unity Exporter',
-              contentMode: unityContentMode,
-              targetScope: unityTargetScope,
-              sizeScope: unitySizeScope,
-              stickerStyle: opts.stickerStyle,
-              stickerShine: opts.stickerShine !== false,
-              fps: unityFps,
-              fingerColors: opts.fingerColors,
-              animations: metaList,
-            },
-            null,
-            2
-          ),
-        });
-        zipEntries.push({
-          path: 'README_UNITY.txt',
-          data: generateUnityReadme(opts, metaList, {
+      zipEntries.push({
+        path: 'Scripts/StickerSpriteAnimator.cs',
+        data: generateUnityCSharpScript(opts, metaList),
+      });
+      zipEntries.push({
+        path: 'unity_import_meta.json',
+        data: JSON.stringify(
+          {
+            generator: 'Keyboard Sticker Unity Exporter',
             contentMode: unityContentMode,
             targetScope: unityTargetScope,
+            stickerStyle: opts.stickerStyle,
+            stickerShine: opts.stickerShine !== false,
             fps: unityFps,
-          }),
-        });
-      }
+            fingerColors: opts.fingerColors,
+            animations: metaList,
+          },
+          null,
+          2
+        ),
+      });
+      zipEntries.push({
+        path: 'README_UNITY.txt',
+        data: generateUnityReadme(opts, metaList, {
+          contentMode: unityContentMode,
+          targetScope: unityTargetScope,
+          fps: unityFps,
+        }),
+      });
 
       const zipBlob = await buildZipBlob(zipEntries);
-      if (exportAbort.signal.aborted) throw new DOMException('Geannuleerd', 'AbortError');
       const safeName = (title.value.trim() || 'sticker_unity')
         .toLowerCase()
         .replace(/[^a-z0-9_-]+/g, '_')
