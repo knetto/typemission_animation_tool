@@ -10,6 +10,11 @@ import {
   BACKGROUND_MODES,
   BOARD_MODES,
   MASK_MODES,
+  UNITY_CONTENT_MODES,
+  UNITY_TARGET_SCOPES,
+  UNITY_SIZE_SCOPES,
+  normalizeUnityExportSettings,
+  UNITY_EXPORT_FORMATS,
   KEYBOARD_LAYOUTS,
   getLayout,
   getFlatKeys,
@@ -19,7 +24,19 @@ import {
   keyExportSlug,
 } from '../keyboard/model.js';
 import { createKeyboardScene } from '../keyboard/renderer.js';
-import { renderCanvasExport, exportSupported } from '../export.js';
+import {
+  buildZipBlob,
+  resolveUnityTargets,
+  renderUnityTargetSprites,
+  generateUnityCSharpScript,
+  generateUnityEditorScript,
+  generateUnityReadme,
+  unityClipTiming,
+  unityFrameTime,
+  unityFrameSize,
+  sliceUnityAudio,
+} from '../keyboard/unity-export.js';
+import { renderCanvasExport, renderCanvasExportMov, exportSupported } from '../export.js';
 import { ensureFonts, logoSvg } from '../scenes/renderer.js';
 import { initEditorPanels } from '../editor-panels.js';
 
@@ -30,6 +47,32 @@ export async function mount(root, { id, project, exportingView = false }) {
   let exports = project.exports || [];
   let scene = null, destroyed = false, raf = 0, playAllMode = false;
   let exporting = false, exportAbort = null, quality = '1080', fps = 30, exportScope = 'all';
+  let unityFormat = opts.unityExport.format,
+    unityContentMode = opts.unityExport.contentMode,
+    unityTargetScope = opts.unityExport.targetScope,
+    unitySizeScope = opts.unityExport.sizeScope,
+    unityCellSize = opts.unityExport.cellSize,
+    unityFps = opts.unityExport.fps,
+    unityTrimDelays = opts.unityExport.trimDelays,
+    unityIncludeBurst = opts.unityExport.includeBurst,
+    unityIncludePress = opts.unityExport.includePress,
+    unityPreviewIsolated = false;
+  let unityPreviewSlug = '';
+
+  function getUnityTargets() {
+    return resolveUnityTargets(opts, unityTargetScope, { sizeScope: unitySizeScope, contentMode: unityContentMode });
+  }
+
+  function unitySettingsChanged() {
+    opts.unityExport = {
+      format: unityFormat, contentMode: unityContentMode, targetScope: unityTargetScope,
+      sizeScope: unitySizeScope, cellSize: unityCellSize, fps: unityFps,
+      trimDelays: unityTrimDelays, includeBurst: unityIncludeBurst, includePress: unityIncludePress,
+    };
+    persist();
+    if (unityPreviewIsolated) rebuildScene(false);
+    paintSettings();
+  }
   let bgImageEl = null, loadedBgUrl = '';
 
   function syncBgImage() {
@@ -147,6 +190,7 @@ export async function mount(root, { id, project, exportingView = false }) {
   );
 
   const canvas = h('canvas', { width: 1920, height: 1080, id: 'kb-canvas', 'aria-label': 'Sticker animatie voorbeeld' });
+  canvas.style.objectFit = 'contain';
   const prevKeyBtn = h('button', { class: 'btn btn-sm btn-ghost', title: 'Vorige geselecteerde toets', onclick: () => stepPreviewKey(-1) }, '◀ Vorige');
   const playBtn = h('button', { class: 'btn btn-sm btn-primary', id: 'kb-play-btn', onclick: () => togglePlay(false) }, icon('play'), 'Speel toets');
   const playAllBtn = h('button', { class: 'btn btn-sm', id: 'kb-play-all-btn', title: 'Speel alle geselecteerde toetsen achter elkaar af', onclick: () => togglePlay(true) }, icon('film'), 'Speel selectie');
@@ -156,11 +200,18 @@ export async function mount(root, { id, project, exportingView = false }) {
   const activePreviewTitle = h('span', { class: 'kb-preview-pill', id: 'kb-active-preview-label' });
   const selectedChipsWrap = h('div', { class: 'kb-selected-chips', id: 'kb-selected-chips' });
 
+  const stageFrame = h(
+    'div',
+    { class: 'stage-frame file-stage-frame kb-stage-frame', onclick: () => togglePlay(false) },
+    h('span', { class: 'transparent-badge' }, h('i'), 'TRANSPARANTE ALPHA'),
+    canvas
+  );
+
   const previewSection = h('section', { class: 'file-preview-section kb-preview-section' },
     h('div', { class: 'file-section-heading' },
       h('b', {}, exportingView ? 'Export voorbeeld per toets' : 'Live Sticker-animatie Voorbeeld'),
       activePreviewTitle),
-    h('div', { class: 'stage-frame file-stage-frame kb-stage-frame', onclick: () => togglePlay(false) }, canvas),
+    stageFrame,
     h('div', { class: 'file-preview-controls kb-preview-controls' }, prevKeyBtn, playBtn, playAllBtn, nextKeyBtn, scrub, timeLabel),
     h('div', { class: 'kb-chips-block' },
       h('div', { class: 'hint' }, 'Klik om de animatie te bekijken · sleep op een toets om van plek te wisselen (⇄) of sleep ertussen om ertussen te plaatsen (⇥):'),
@@ -175,7 +226,7 @@ export async function mount(root, { id, project, exportingView = false }) {
   // Right panel: Animation settings & Batch Export
   const settingsBody = h('div', { class: 'panel-body', id: 'kb-settings' });
   const right = h('aside', { class: 'panel right file-settings-panel kb-settings-panel', 'aria-label': 'Sticker & Export instellingen' },
-    h('div', { class: 'panel-heading' }, icon(exportingView ? 'download' : 'edit'), exportingView ? 'Batch Export (MP4 per toets)' : 'Sticker-animatie'),
+    h('div', { class: 'panel-heading' }, icon(exportingView ? 'download' : 'edit'), exportingView ? 'Exportinstellingen' : 'Sticker-animatie'),
     settingsBody
   );
 
@@ -259,12 +310,14 @@ export async function mount(root, { id, project, exportingView = false }) {
   }
 
   function setPreviewKey(keyId, autoPlay = true) {
-    if (!keyId) return;
+    if (!keyId || exporting) return;
     opts.previewKey = keyId;
+    unityPreviewSlug = '';
     persist();
     paintKeyboardGrid();
     paintSelectedChips();
     rebuildScene(false);
+    paintSettings();
     if (autoPlay) startPlay(false);
   }
 
@@ -282,16 +335,52 @@ export async function mount(root, { id, project, exportingView = false }) {
     return idx > 0 ? opts.selectedKeys.slice(0, idx) : [];
   }
 
+  function buildPreviewScene(keyId) {
+    const isTransparentPreview = opts.bgMode === 'transparent' || unityPreviewIsolated;
+    stageFrame.classList.toggle('is-transparent', isTransparentPreview);
+    const spriteMode =
+      unityPreviewIsolated && unityContentMode !== 'full_board' ? unityContentMode : null;
+    const previewOpts =
+      unityPreviewIsolated && unityContentMode === 'full_board'
+        ? { ...opts, bgMode: 'transparent' }
+        : opts;
+    const targets = unityPreviewIsolated ? getUnityTargets() : [];
+    const target = targets.find((t) => t.slug === unityPreviewSlug) || targets.find((t) => t.keyId === keyId) || targets[0];
+    if (target) unityPreviewSlug = target.slug;
+    const rendered = createKeyboardScene(canvas, target?.keyId || keyId, previewOpts, {
+      preStickeredIds: getPreStickeredIdsFor(target?.keyId || keyId),
+      bgImage: bgImageEl,
+      spriteMode,
+      colorOverride: target?.colorOverride || null,
+      includeBurst: unityPreviewIsolated ? unityIncludeBurst : true,
+      includePress: unityPreviewIsolated ? unityIncludePress : true,
+    });
+    const size = unityPreviewIsolated ? unityFrameSize(rendered.spriteBox, unityContentMode, unityCellSize) : { cellWidth: 1920, cellHeight: 1080 };
+    canvas.width = size.cellWidth;
+    canvas.height = size.cellHeight;
+    if (!unityPreviewIsolated) return rendered;
+    const timing = unityClipTiming(rendered.schedule, { contentMode: unityContentMode, trimStillDelays: unityTrimDelays, fps: unityFps });
+    return {
+      ...rendered,
+      schedule: { ...rendered.schedule, total: timing.duration, peelEnd: rendered.schedule.peelEnd - timing.tStart },
+      soundtrack: sliceUnityAudio(rendered.soundtrack, timing),
+      draw: (t) => rendered.draw(unityFrameTime(timing, Math.min(timing.frameCount - 1, Math.floor(t * unityFps + 1e-7)))),
+    };
+  }
+
   function rebuildScene(keepTime = false) {
     const prevT = keepTime ? +scrub.value : 0;
     stopPlay();
-    scene = createKeyboardScene(canvas, opts.previewKey, opts, {
-      preStickeredIds: getPreStickeredIdsFor(opts.previewKey),
-      bgImage: bgImageEl,
-    });
+    scene?.dispose();
+    scene = buildPreviewScene(opts.previewKey);
     player.load(scene.soundtrack, 0);
+    scrub.step = unityPreviewIsolated ? String(1 / unityFps) : '0.02';
     scrub.max = scene.schedule.total;
-    drawAt(keepTime ? Math.min(prevT, scene.schedule.total) : 0);
+    const defaultStartT =
+      unityPreviewIsolated && unityContentMode === 'sticker_only'
+        ? scene.schedule.peelEnd
+        : 0;
+    drawAt(keepTime ? Math.min(prevT, scene.schedule.total) : defaultStartT);
     updateActivePreviewBadge();
   }
 
@@ -299,11 +388,12 @@ export async function mount(root, { id, project, exportingView = false }) {
     if (!scene?.targetKey) return;
     const tk = scene.targetKey;
     const fInfo = FINGERS.find((f) => f.id === tk.finger) || FINGERS[0];
-    const col = opts.fingerColors[tk.finger] || fInfo.defaultColor;
+    const target = unityPreviewIsolated ? getUnityTargets().find((t) => t.slug === unityPreviewSlug) : null;
+    const col = target?.colorOverride || opts.fingerColors[tk.finger] || fInfo.defaultColor;
     activePreviewTitle.replaceChildren(
       h('span', { class: 'kb-dot', style: { background: col } }),
-      h('b', {}, `Toets "${tk.label}"`),
-      h('span', {}, ` · ${fInfo.name}`)
+      h('b', {}, target?.label || `Toets "${tk.label}"`),
+      ...(!target ? [h('span', {}, ` · ${fInfo.name}`)] : [])
     );
   }
 
@@ -345,10 +435,7 @@ export async function mount(root, { id, project, exportingView = false }) {
             opts.previewKey = opts.selectedKeys[idx + 1];
             paintKeyboardGrid();
             paintSelectedChips();
-            scene = createKeyboardScene(canvas, opts.previewKey, opts, {
-              preStickeredIds: getPreStickeredIdsFor(opts.previewKey),
-              bgImage: bgImageEl,
-            });
+            scene = buildPreviewScene(opts.previewKey);
             player.load(scene.soundtrack, 0);
             updateActivePreviewBadge();
             player.play(0).then(() => {
@@ -1423,6 +1510,247 @@ export async function mount(root, { id, project, exportingView = false }) {
       !exportSupported() ? h('p', { class: 'bt-warn' }, 'WebCodecs video-export vereist Chrome of Edge.') : null
     );
 
+    // Unity Sprite & Effect Export Card (multiple options: Sprite Sheet PNG, Frame Sequence ZIP, Transparent WebM/MOV, C# Script)
+    const unityTargets = getUnityTargets();
+    const unityColorCount = new Set(unityTargets.map((target) => target.colorOverride)).size;
+    const unitySizeCount = new Set(unityTargets.map((target) => target.sizeId)).size;
+    const unityBtn = h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn btn-primary',
+        id: 'start-unity-export-btn',
+        onclick: startUnityExport,
+        disabled: !exporting && !unityTargets.length,
+      },
+      icon(exporting ? 'stop' : 'download'),
+      exporting
+        ? 'Export annuleren'
+        : `Exporteer voor Unity (${unityTargets.length} ${unityTargets.length === 1 ? 'animatie' : 'animaties'})`
+    );
+
+    const unityCard = h(
+      'div',
+      { class: 'insp-card' },
+      h('h6', {}, '🕹️ Unity Sprite & Effect Export'),
+      h(
+        'p',
+        { class: 'hint' },
+        'Kies je kleuren en toetsformaten. Je krijgt elke benodigde animatie op een transparante achtergrond, met de echte vorm en beweging van de toets.'
+      ),
+      h(
+        'label',
+        { class: 'field' },
+        '1. Unity Export-formaat',
+        h(
+          'select',
+          {
+            class: 'select',
+            id: 'kb-unity-format',
+            disabled: exporting,
+            onchange: (e) => {
+              unityFormat = e.target.value;
+              unitySettingsChanged();
+            },
+          },
+          ...Object.entries(UNITY_EXPORT_FORMATS).map(([k, fmt]) =>
+            h('option', { value: k, selected: unityFormat === k }, fmt.name)
+          )
+        ),
+        h('small', { class: 'hint' }, UNITY_EXPORT_FORMATS[unityFormat]?.desc || '')
+      ),
+      h(
+        'label',
+        { class: 'field' },
+        '2. Wat renderen in de Sprite?',
+        h(
+          'select',
+          {
+            class: 'select',
+            id: 'kb-unity-content-mode',
+            disabled: exporting,
+            onchange: (e) => {
+              unityContentMode = e.target.value;
+              unitySettingsChanged();
+            },
+          },
+          ...Object.entries(UNITY_CONTENT_MODES).map(([k, cm]) =>
+            h('option', { value: k, selected: unityContentMode === k }, cm.name)
+          )
+        ),
+        h('small', { class: 'hint' }, UNITY_CONTENT_MODES[unityContentMode]?.desc || '')
+      ),
+      h(
+        'label',
+        { class: 'field' },
+        '3. Welke kleuren of toetsen?',
+        h(
+          'select',
+          {
+            class: 'select',
+            id: 'kb-unity-target-scope',
+            disabled: exporting,
+            onchange: (e) => {
+              unityTargetScope = e.target.value;
+              unitySettingsChanged();
+            },
+          },
+          ...Object.entries(UNITY_TARGET_SCOPES).map(([k, ts]) =>
+            h(
+              'option',
+              { value: k, selected: unityTargetScope === k },
+              k === 'selected_keys' ? `${ts.name} (${opts.selectedKeys.length})` : ts.name
+            )
+          )
+        ),
+        h('small', { class: 'hint' }, UNITY_TARGET_SCOPES[unityTargetScope]?.desc || '')
+      ),
+      ['current_key', 'selected_keys'].includes(unityTargetScope) ? null : h(
+        'label', { class: 'field' }, '4. Welke toetsformaten?',
+        h('select', {
+          class: 'select', id: 'kb-unity-size-scope', disabled: exporting,
+          onchange: (e) => { unitySizeScope = e.target.value; unitySettingsChanged(); },
+        }, ...Object.entries(UNITY_SIZE_SCOPES).map(([value, info]) =>
+          h('option', { value, selected: unitySizeScope === value }, info.name))),
+        h('small', { class: 'hint' }, UNITY_SIZE_SCOPES[unitySizeScope].desc)
+      ),
+      h('div', { class: 'hint', role: 'status', id: 'kb-unity-summary' },
+        unityTargets.length
+          ? `${unityTargets.length} ${unityTargets.length === 1 ? 'animatie' : 'animaties'} · ${unityColorCount} ${unityColorCount === 1 ? 'kleur' : 'kleuren'} · ${unitySizeCount} ${unitySizeCount === 1 ? 'toetsformaat' : 'toetsformaten'}. Elke variant heeft een eigen bestand; brede toetsen behouden hun verhoudingen.`
+          : 'Selecteer eerst toetsen op het toetsenbord, of kies alle kleuren en alle toetsformaten.'
+      ),
+      h(
+        'div',
+        { class: 'row' },
+        h(
+          'label',
+          { class: 'field', style: { flex: 1 } },
+          'Resolutie (inclusief effectruimte)',
+          h(
+            'select',
+            {
+              class: 'select',
+              id: 'kb-unity-cell-size',
+              disabled: exporting,
+              onchange: (e) => {
+                unityCellSize = +e.target.value;
+                unitySettingsChanged();
+              },
+            },
+            h('option', { value: 256, selected: unityCellSize === 256 }, 'Standaard (1×)'),
+            h('option', { value: 384, selected: unityCellSize === 384 }, 'Scherp (1,5×)'),
+            h('option', { value: 512, selected: unityCellSize === 512 }, 'Extra scherp (2×)')
+          )
+        ),
+        h(
+          'label',
+          { class: 'field', style: { flex: 1 } },
+          'Sprite FPS',
+          h(
+            'select',
+            {
+              class: 'select',
+              id: 'kb-unity-fps',
+              disabled: exporting,
+              onchange: (e) => {
+                unityFps = +e.target.value;
+                unitySettingsChanged();
+              },
+            },
+            h('option', { value: 24, selected: unityFps === 24 }, '24 FPS'),
+            h('option', { value: 30, selected: unityFps === 30 }, '30 FPS'),
+            h('option', { value: 60, selected: unityFps === 60 }, '60 FPS')
+          )
+        )
+      ),
+      h(
+        'label',
+        { class: 'toggle' },
+        h('input', {
+          type: 'checkbox',
+          id: 'kb-unity-trim-delays',
+          checked: unityTrimDelays,
+          disabled: exporting,
+          onchange: (e) => {
+            unityTrimDelays = e.target.checked;
+            unitySettingsChanged();
+          },
+        }),
+        h('span', { class: 'track' }),
+        'Alleen actie-frames (knip start/eind pauze weg)'
+      ),
+      h(
+        'label',
+        { class: 'toggle' },
+        h('input', {
+          type: 'checkbox',
+          id: 'kb-unity-include-burst',
+          checked: unityIncludeBurst,
+          disabled: exporting,
+          onchange: (e) => {
+            unityIncludeBurst = e.target.checked;
+            unitySettingsChanged();
+          },
+        }),
+        h('span', { class: 'track' }),
+        'Sparkle-burst effect meenemen'
+      ),
+      h(
+        'label',
+        { class: 'toggle' },
+        h('input', {
+          type: 'checkbox',
+          id: 'kb-unity-include-press',
+          checked: unityIncludePress,
+          disabled: exporting,
+          onchange: (e) => {
+            unityIncludePress = e.target.checked;
+            unitySettingsChanged();
+          },
+        }),
+        h('span', { class: 'track' }),
+        'Toets-indrukbeweging meenemen'
+      ),
+      h(
+        'label',
+        { class: 'toggle' },
+        h('input', {
+          type: 'checkbox',
+          id: 'kb-unity-preview-isolated',
+          checked: unityPreviewIsolated,
+          disabled: exporting,
+          onchange: (e) => {
+            unityPreviewIsolated = e.target.checked;
+            rebuildScene(false);
+            paintSettings();
+          },
+        }),
+        h('span', { class: 'track' }),
+        'Toon exact exportvoorbeeld (met gekozen FPS en timing)'
+      ),
+      unityPreviewIsolated && unityTargets.length ? h('label', { class: 'field' }, 'Variant in het exportvoorbeeld',
+        h('select', {
+          class: 'select', id: 'kb-unity-preview-target', disabled: exporting,
+          onchange: (e) => { unityPreviewSlug = e.target.value; rebuildScene(false); paintSettings(); },
+        }, ...unityTargets.map((target) => h('option', { value: target.slug, selected: target.slug === unityPreviewSlug }, target.label)))
+      ) : null,
+      unityFormat === 'spritesheet_png' && unityTargets.length > 1
+        ? h('small', { class: 'hint' }, 'Meerdere sheets worden samen als één ZIP gedownload.') : null,
+      h('button', {
+        type: 'button', class: 'btn btn-sm btn-ghost', disabled: exporting,
+        onclick: () => {
+          const defaults = normalizeUnityExportSettings();
+          unityFormat = defaults.format; unityContentMode = defaults.contentMode;
+          unityTargetScope = defaults.targetScope; unitySizeScope = defaults.sizeScope;
+          unityCellSize = defaults.cellSize; unityFps = defaults.fps;
+          unityTrimDelays = defaults.trimDelays; unityIncludeBurst = defaults.includeBurst;
+          unityIncludePress = defaults.includePress;
+          unitySettingsChanged();
+        },
+      }, 'Herstel exportinstellingen'),
+      unityBtn
+    );
+
     const exportsListCard = h('div', { class: 'insp-card' },
       h('div', { class: 'file-section-heading', style: { marginBottom: '4px' } },
         h('h6', {}, `📦 Opgeslagen exports (${exports.length})`),
@@ -1467,9 +1795,246 @@ export async function mount(root, { id, project, exportingView = false }) {
     }
 
     if (exportingView) {
-      settingsBody.append(exportCard, styleCard, exportsListCard);
+      settingsBody.append(unityCard, exportCard, styleCard, exportsListCard);
     } else {
-      settingsBody.append(styleCard, exportCard, exportsListCard);
+      settingsBody.append(styleCard, unityCard, exportCard, exportsListCard);
+    }
+  }
+
+  function triggerBlobDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 15000);
+  }
+
+  async function startUnityExport() {
+    if (exporting) {
+      exportAbort?.abort();
+      return;
+    }
+    const targets = getUnityTargets();
+    if (!targets.length) return toast('Geen toetsen of vingerkleuren gevonden om te exporteren', 'err');
+
+    stopPlay();
+    exporting = true;
+    exportAbort = new AbortController();
+    paintSettings();
+    expProgress.hidden = false;
+    expStatus.hidden = false;
+
+    try {
+      await persist();
+      await syncBgImage();
+
+      // Option A: Transparent Video (.webm VP9 with Alpha or .mov ProRes 4444 with Alpha)
+      if (unityFormat === 'webm_alpha' || unityFormat === 'mov_alpha') {
+        const vidFormat = unityFormat === 'webm_alpha' ? 'webm' : 'mov';
+        const spriteMode = unityContentMode === 'full_board' ? null : unityContentMode;
+        const effectiveOpts =
+          unityContentMode === 'full_board' ? { ...opts, bgMode: 'transparent' } : opts;
+
+        for (let i = 0; i < targets.length; i++) {
+          if (exportAbort.signal.aborted) throw new DOMException('Geannuleerd', 'AbortError');
+          const target = targets[i];
+          const probeCanvas = document.createElement('canvas');
+          probeCanvas.width = 256;
+          probeCanvas.height = 256;
+          const probe = createKeyboardScene(probeCanvas, target.keyId, effectiveOpts, {
+            bgImage: bgImageEl,
+            spriteMode,
+            colorOverride: target.colorOverride,
+            includeBurst: unityIncludeBurst,
+            includePress: unityIncludePress,
+            preStickeredIds: getPreStickeredIdsFor(target.keyId),
+          });
+          const frameSize = unityFrameSize(probe.spriteBox, unityContentMode, unityCellSize);
+          const outW = Math.ceil(frameSize.cellWidth / 2) * 2;
+          const outH = Math.ceil(frameSize.cellHeight / 2) * 2;
+          probe.dispose();
+
+          const outCanvas = document.createElement('canvas');
+          outCanvas.width = outW;
+          outCanvas.height = outH;
+          const rendered = createKeyboardScene(outCanvas, target.keyId, effectiveOpts, {
+            bgImage: bgImageEl,
+            spriteMode,
+            colorOverride: target.colorOverride,
+            includeBurst: unityIncludeBurst,
+            includePress: unityIncludePress,
+            preStickeredIds: getPreStickeredIdsFor(target.keyId),
+          });
+          const timing = unityClipTiming(rendered.schedule, { contentMode: unityContentMode, trimStillDelays: unityTrimDelays, fps: unityFps });
+          const clipScene = {
+            ...rendered,
+            draw: (t) => rendered.draw(unityFrameTime(timing, Math.min(timing.frameCount - 1, Math.round(t * unityFps)))),
+          };
+          const result = await renderCanvasExportMov({
+            projectId: id,
+            canvas: outCanvas,
+            scene: clipScene,
+            soundtrack: sliceUnityAudio(rendered.soundtrack, timing),
+            duration: timing.duration,
+            mode: 'keyboard',
+            format: vidFormat,
+            transparent: true,
+            width: outW,
+            height: outH,
+            fps: unityFps,
+            signal: exportAbort.signal,
+            onProgress: (p, label) => {
+              expProgress.value = (i + p) / targets.length;
+              expStatus.textContent = `Unity ${vidFormat.toUpperCase()} ${i + 1}/${targets.length} (${target.label}) · ${label}`;
+            },
+          });
+          rendered.dispose();
+          exports.unshift(result);
+          paintSettings();
+        }
+        toast(`Transparante ${vidFormat.toUpperCase()}-export(s) klaar voor Unity VideoPlayer!`, 'ok', 4500);
+        return;
+      }
+
+      // Option B: Sprite Sheet PNG(s) and/or PNG Frame Sequences + WAV + Unity C# Script
+      const assetsOnly = unityFormat === 'spritesheet_audio_zip';
+      const wantSpriteSheet =
+        assetsOnly || unityFormat === 'spritesheet_zip' || unityFormat === 'both_zip' || unityFormat === 'spritesheet_png';
+      const wantFrames = unityFormat === 'frames_zip' || unityFormat === 'both_zip';
+
+      const zipEntries = [];
+      const metaList = [];
+      let sharedWavBlob = null;
+
+      for (let i = 0; i < targets.length; i++) {
+        if (exportAbort.signal.aborted) throw new DOMException('Geannuleerd', 'AbortError');
+        const target = targets[i];
+        expStatus.textContent = `Unity Sprite ${i + 1}/${targets.length} renderen (${target.label})…`;
+
+        const res = await renderUnityTargetSprites({
+          target,
+          opts,
+          bgImage: bgImageEl,
+          contentMode: unityContentMode,
+          baseCellSize: unityCellSize,
+          fps: unityFps,
+          trimStillDelays: unityTrimDelays,
+          includeBurst: unityIncludeBurst,
+          includePress: unityIncludePress,
+          preStickeredIds: getPreStickeredIdsFor(target.keyId),
+          wantSpriteSheet,
+          wantFrames,
+          signal: exportAbort.signal,
+          onFrameProgress: (fp) => {
+            expProgress.value = ((i + fp) / targets.length) * 0.92;
+          },
+        });
+
+        if (exportAbort.signal.aborted) throw new DOMException('Geannuleerd', 'AbortError');
+        metaList.push(res.meta);
+        if (!sharedWavBlob) sharedWavBlob = res.wavBlob;
+
+        if (unityFormat === 'spritesheet_png' && targets.length === 1 && res.spriteSheetBlob) {
+          triggerBlobDownload(res.spriteSheetBlob, res.meta.filename);
+        } else {
+          if (res.spriteSheetBlob) {
+            zipEntries.push({
+              path: `SpriteSheets/${res.meta.filename}`,
+              data: res.spriteSheetBlob,
+            });
+          }
+          if (res.frameBlobs.length) {
+            for (const fb of res.frameBlobs) {
+              zipEntries.push({
+                path: `Frames/${target.slug}/${fb.filename}`,
+                data: fb.blob,
+              });
+            }
+          }
+        }
+      }
+
+      if (unityFormat === 'spritesheet_png') {
+        if (targets.length > 1) {
+          zipEntries.push({ path: 'unity_import_meta.json', data: JSON.stringify({ animations: metaList }, null, 2) });
+          triggerBlobDownload(await buildZipBlob(zipEntries), 'sticker_spritesheets.zip');
+        }
+        expProgress.value = 1;
+        toast(`${targets.length} transparante Sprite Sheet PNG('s) gedownload!`, 'ok', 4500);
+        return;
+      }
+
+      expStatus.textContent = assetsOnly
+        ? 'ZIP samenstellen (Sprite Sheet + WAV)…'
+        : 'Unity .zip pakket samenstellen (Sprite Sheet + WAV + C# script)…';
+      expProgress.value = 0.96;
+
+      if (sharedWavBlob && opts.sounds !== false) {
+        zipEntries.push({ path: 'Audio/sticker_sfx.wav', data: sharedWavBlob });
+      }
+      if (!assetsOnly) {
+        zipEntries.push({
+          path: 'Scripts/StickerSpriteAnimator.cs',
+          data: generateUnityCSharpScript(opts, metaList),
+        });
+        zipEntries.push({
+          path: 'Editor/ImportStickerSprites.cs',
+          data: generateUnityEditorScript(metaList, { wantSpriteSheet }),
+        });
+        zipEntries.push({
+          path: 'unity_import_meta.json',
+          data: JSON.stringify(
+            {
+              generator: 'Keyboard Sticker Unity Exporter',
+              contentMode: unityContentMode,
+              targetScope: unityTargetScope,
+              sizeScope: unitySizeScope,
+              stickerStyle: opts.stickerStyle,
+              stickerShine: opts.stickerShine !== false,
+              fps: unityFps,
+              fingerColors: opts.fingerColors,
+              animations: metaList,
+            },
+            null,
+            2
+          ),
+        });
+        zipEntries.push({
+          path: 'README_UNITY.txt',
+          data: generateUnityReadme(opts, metaList, {
+            contentMode: unityContentMode,
+            targetScope: unityTargetScope,
+            fps: unityFps,
+          }),
+        });
+      }
+
+      const zipBlob = await buildZipBlob(zipEntries);
+      if (exportAbort.signal.aborted) throw new DOMException('Geannuleerd', 'AbortError');
+      const safeName = (title.value.trim() || 'sticker_unity')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      const zipFilename = `${safeName || 'sticker'}_unity_${unityContentMode}_${unityTargetScope}_${unityFps}fps.zip`;
+      triggerBlobDownload(zipBlob, zipFilename);
+      expProgress.value = 1;
+      toast(`Unity Sprite-pakket (${zipFilename}) gedownload!`, 'ok', 4500);
+    } catch (e) {
+      toast(
+        e.name === 'AbortError' ? 'Unity-export geannuleerd' : 'Unity-export mislukt: ' + e.message,
+        e.name === 'AbortError' ? 'info' : 'err'
+      );
+    } finally {
+      exporting = false;
+      exportAbort = null;
+      expProgress.hidden = true;
+      expStatus.hidden = true;
+      if (!destroyed) {
+        paintSettings();
+      }
     }
   }
 

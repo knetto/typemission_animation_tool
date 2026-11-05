@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node --no-warnings server/index.js",
     "dev": "node --no-warnings --watch server/index.js",
-    "test": "node --no-warnings --test \"server/tests/*.test.js\""
+    "test": "node --no-warnings --test \"server/tests/*.test.js\"",
+    "test:keyboard-sprites": "node --no-warnings server/tests/keyboard-sprites.browser.mjs"
   },
   "engines": {
     "node": ">=22.5"

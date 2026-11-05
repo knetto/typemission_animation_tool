@@ -139,7 +139,19 @@ export function computeKeyRects(layoutId) {
   };
 }
 
-export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStickeredIds = [], bgImage = null } = {}) {
+export function createKeyboardScene(
+  canvas,
+  targetKeyId,
+  options = {},
+  {
+    preStickeredIds = [],
+    bgImage = null,
+    spriteMode = null,
+    colorOverride = null,
+    includeBurst = true,
+    includePress = true,
+  } = {}
+) {
   const opts = normalizeKeyboardOpts(options);
   const theme = KEYBOARD_THEMES[opts.theme] || KEYBOARD_THEMES.dark;
   const schedule = keyboardSchedule(opts);
@@ -150,6 +162,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
   let g = canvas.getContext('2d');
 
   const isChromaOrCutout =
+    opts.bgMode === 'transparent' ||
     opts.bgMode === 'greenscreen' ||
     (opts.bgMode === 'masked' && (opts.maskMode === 'cutout' || opts.maskMode === 'board' || opts.maskMode === 'keys'));
   const effectiveBoardMode =
@@ -384,7 +397,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
   }
 
   // Celebratory micro-sparkles + ripple ring when the sticker seals onto the keycap
-  function drawSealBurst(k, color, burstP) {
+  function drawSealBurst(k, color, burstP, pressY = 0) {
     if (burstP <= 0 || burstP >= 1) return;
     const p = easeOutCubic(burstP);
     const alpha = Math.pow(1 - burstP, 1.5);
@@ -395,7 +408,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     g.strokeStyle = rgba(color, alpha * 0.75);
     g.lineWidth = lerp(4, 1, p);
     g.beginPath();
-    g.roundRect(k.x - expand, k.y - expand, k.w + expand * 2, k.h + expand * 2, 14 + expand * 0.5);
+    g.roundRect(k.x - expand, k.y + pressY - expand, k.w + expand * 2, k.h + expand * 2, 14 + expand * 0.5);
     g.stroke();
 
     // 12 radial sparkle particles hugging the key's width & height
@@ -404,8 +417,8 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       const angle = (i / count) * Math.PI * 2 + 0.25;
       const rx = k.w * 0.5 + lerp(4, 34, p);
       const ry = k.h * 0.5 + lerp(4, 34, p);
-      const px = k.cx + Math.cos(angle) * rx;
-      const py = k.cy + Math.sin(angle) * ry;
+      const px = k.x + k.w / 2 + Math.cos(angle) * rx;
+      const py = k.y + k.h / 2 + pressY + Math.sin(angle) * ry;
       const r = lerp(5.5, 1.2, p);
       g.fillStyle = i % 2 === 0 ? '#ffffff' : mixHex(color, '#ffffff', 0.35);
       g.globalAlpha = alpha;
@@ -469,20 +482,41 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
   }
 
   // Pre-render static layers once so per-frame draw(t) only renders the active key + sticker
-  const activeColor = opts.fingerColors[targetKey.finger] || '#456d74';
+  const activeColor = colorOverride || opts.fingerColors[targetKey.finger] || '#456d74';
+  // Keep the entire entrance and its shadow inside the cell, including a
+  // rotated, enlarged spacebar. Padding must grow with the key for pop.
+  const spritePadX = opts.stickerStyle === 'pop'
+    ? Math.max(78, Math.ceil((1.65 * (targetKey.w + targetKey.h * Math.sin(0.18)) - targetKey.w) / 2 + 64))
+    : 78;
+  const spritePadY = opts.stickerStyle === 'pop'
+    ? Math.max(78, Math.ceil((1.65 * (targetKey.h + targetKey.w * Math.sin(0.18)) - targetKey.h) / 2 + 56 + 86))
+    : opts.stickerStyle === 'slide' ? 130 : 78;
+  const spriteBox = {
+    pad: Math.max(spritePadX, spritePadY),
+    keyW: targetKey.w,
+    keyH: targetKey.h,
+    // A fixed anchor at the middle of the entire key's bounds, including ISO
+    // Enter. Its typography/finger anchor (cx) is offset into its lower leg.
+    centerX: targetKey.x + targetKey.w / 2,
+    centerY: targetKey.y + targetKey.h / 2,
+    logicalW: Math.ceil(targetKey.w + spritePadX * 2),
+    logicalH: Math.ceil(targetKey.h + spritePadY * 2),
+  };
   let bgCache = null, boardCache = null, hudCache = null;
 
   function ensureCaches() {
-    if (bgCache) return;
+    if (bgCache || spriteMode === 'sticker_only' || spriteMode === 'key_and_sticker') return;
     const savedG = g;
 
-    // 1. Background Cache (Studio / Black / White / Greenscreen / Custom Color / Image / Masked)
+    // 1. Background Cache (Studio / Transparent / Black / White / Greenscreen / Custom Color / Image / Masked)
     bgCache = document.createElement('canvas');
     bgCache.width = W;
     bgCache.height = H;
     g = bgCache.getContext('2d');
 
-    if (opts.bgMode === 'black') {
+    if (opts.bgMode === 'transparent') {
+      g.clearRect(0, 0, W, H);
+    } else if (opts.bgMode === 'black') {
       g.fillStyle = '#000000';
       g.fillRect(0, 0, W, H);
     } else if (opts.bgMode === 'white') {
@@ -647,6 +681,76 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
   function draw(t) {
     ensureCaches();
     t = Math.max(0, Math.min(schedule.total, Number(t) || 0));
+    g.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Target key animation state
+    let highlightAlpha = 0;
+    if (t >= schedule.focusStart && t < schedule.peelEnd) {
+      const pulse = 0.75 + 0.25 * Math.sin((t - schedule.focusStart) * 10);
+      highlightAlpha = clamp01((t - schedule.focusStart) / 0.25) * pulse;
+    } else if (t >= schedule.peelEnd && t < schedule.shineEnd) {
+      highlightAlpha = (1 - clamp01((t - schedule.peelEnd) / Math.max(0.1, schedule.shineEnd - schedule.peelEnd))) * 0.5;
+    }
+
+    // Physical key depression when sticker seals at pressPeak
+    let pressY = 0;
+    if (includePress && t >= schedule.peelEnd - 0.08 && t <= schedule.pressDone) {
+      const dp = (t - (schedule.peelEnd - 0.08)) / (schedule.pressDone - (schedule.peelEnd - 0.08));
+      pressY = Math.sin(clamp01(dp) * Math.PI) * 6.5;
+    }
+
+    // Sticker progress (0 -> 1)
+    let stickerProgress = 0;
+    if (t >= schedule.peelStart) {
+      stickerProgress = clamp01((t - schedule.peelStart) / Math.max(0.1, schedule.peelEnd - schedule.peelStart));
+    }
+
+    // Glossy shine sweep progress
+    let shineProgress = -1;
+    if (t >= schedule.shineStart && t <= schedule.shineEnd) {
+      shineProgress = clamp01((t - schedule.shineStart) / Math.max(0.1, schedule.shineEnd - schedule.shineStart));
+    }
+
+    // Isolated transparent Unity Sprite mode ('sticker_only' or 'key_and_sticker')
+    if (spriteMode === 'sticker_only' || spriteMode === 'key_and_sticker') {
+      const uniformScale = Math.min(canvas.width / spriteBox.logicalW, canvas.height / spriteBox.logicalH);
+      g.save();
+      g.translate(canvas.width / 2, canvas.height / 2);
+      g.scale(uniformScale, uniformScale);
+      g.translate(-spriteBox.centerX, -spriteBox.centerY);
+
+      const targetTopRect =
+        spriteMode === 'key_and_sticker'
+          ? drawKeycapBase(targetKey, pressY, highlightAlpha, activeColor, {
+              laneColored: isKeyLaneColored(targetKey),
+            })
+          : {
+              topX: targetKey.x,
+              topY: targetKey.y + pressY,
+              topW: targetKey.w,
+              topH: targetKey.h,
+              topStepX: targetKey.isoStepX || 0,
+              topStepY: targetKey.isoStepY || 0,
+            };
+
+      if (stickerProgress > 0) {
+        drawStickerSurface(targetKey, targetTopRect, activeColor, {
+          style: opts.stickerStyle,
+          progress: stickerProgress,
+          shineProgress,
+          blank: opts.blankSticker,
+        });
+      }
+
+      if (includeBurst && t >= schedule.peelEnd - 0.02 && t <= schedule.shineEnd) {
+        const burstP = (t - (schedule.peelEnd - 0.02)) / 0.52;
+        drawSealBurst(targetKey, activeColor, burstP, pressY);
+      }
+
+      g.restore();
+      return;
+    }
+
     g.save();
     g.scale(canvas.width / W, canvas.height / H);
 
@@ -674,37 +778,10 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     // 3. Blit pre-rendered keyboard chassis + all non-target keys
     g.drawImage(boardCache, 0, 0);
 
-    // 4. Target key animation state
-    let highlightAlpha = 0;
-    if (t >= schedule.focusStart && t < schedule.peelEnd) {
-      const pulse = 0.75 + 0.25 * Math.sin((t - schedule.focusStart) * 10);
-      highlightAlpha = clamp01((t - schedule.focusStart) / 0.25) * pulse;
-    } else if (t >= schedule.peelEnd && t < schedule.shineEnd) {
-      highlightAlpha = (1 - clamp01((t - schedule.peelEnd) / Math.max(0.1, schedule.shineEnd - schedule.peelEnd))) * 0.5;
-    }
-
-    // Physical key depression when sticker seals at pressPeak
-    let pressY = 0;
-    if (t >= schedule.peelEnd - 0.08 && t <= schedule.pressDone) {
-      const dp = (t - (schedule.peelEnd - 0.08)) / (schedule.pressDone - (schedule.peelEnd - 0.08));
-      pressY = Math.sin(clamp01(dp) * Math.PI) * 6.5;
-    }
-
+    // 4. Draw target key + sticker + seal burst
     const targetTopRect = drawKeycapBase(targetKey, pressY, highlightAlpha, activeColor, {
       laneColored: isKeyLaneColored(targetKey),
     });
-
-    // Sticker progress (0 -> 1)
-    let stickerProgress = 0;
-    if (t >= schedule.peelStart) {
-      stickerProgress = clamp01((t - schedule.peelStart) / Math.max(0.1, schedule.peelEnd - schedule.peelStart));
-    }
-
-    // Glossy shine sweep progress
-    let shineProgress = -1;
-    if (t >= schedule.shineStart && t <= schedule.shineEnd) {
-      shineProgress = clamp01((t - schedule.shineStart) / Math.max(0.1, schedule.shineEnd - schedule.shineStart));
-    }
 
     if (stickerProgress > 0) {
       drawStickerSurface(targetKey, targetTopRect, activeColor, {
@@ -716,9 +793,9 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     }
 
     // Celebratory burst right as the sticker seals
-    if (t >= schedule.peelEnd - 0.02 && t <= schedule.shineEnd) {
+    if (includeBurst && t >= schedule.peelEnd - 0.02 && t <= schedule.shineEnd) {
       const burstP = (t - (schedule.peelEnd - 0.02)) / 0.52;
-      drawSealBurst(targetKey, activeColor, burstP);
+      drawSealBurst(targetKey, activeColor, burstP, pressY);
     }
 
     g.restore(); // end camera zoom
@@ -733,9 +810,10 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     schedule,
     soundtrack,
     targetKey,
+    spriteBox,
     draw,
-    reset() {},
-    dispose() {},
+    reset() { },
+    dispose() { },
   };
 }
 

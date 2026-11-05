@@ -7507,9 +7507,9 @@ kbd {
 
 .cselect-item-label {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.3;
+  word-break: break-word;
 }
 
 .cselect-item-check {

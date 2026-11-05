@@ -22,6 +22,14 @@ Kies bij een nieuw project **Audio Terminal** of **File Terminal**. Bewerk je st
 
 ## ✨ Functies
 
+### Toetsstickers voor Unity
+
+Kies bij **Unity Sprite & Effect Export** welke kleuren en toetsformaten je wilt: alleen de benodigde combinaties uit je selectie, alle vingerkleuren en formaten, of alleen de kleur/het formaat van de voorbeeldtoets. **Huidige voorbeeldtoets** en **Geselecteerde toetsen** exporteren de toetsen afzonderlijk, met hun eigen vorm en eventuele letters. Instellingen worden per project onthouden; **Herstel exportinstellingen** zet de exportkeuzes terug.
+
+Met **Toon exact exportvoorbeeld** bekijk je een gekozen variant op de exportresolutie, met dezelfde FPS, timing en transparantie als de download. Brede toetsen en ISO-Enter behouden hun echte vorm; pop- en slidebewegingen krijgen voldoende effectruimte. Meerdere losse sheets worden samen als ZIP gedownload.
+
+Pak een volledig ZIP-exportpakket uit onder Unity `Assets`. Met het **2D Sprite**-pakket geïnstalleerd kies je **Tools → Sticker Animaties → Importeer exportpakket**. Het meegeleverde Editor-script snijdt alleen de echte frames en maakt `.anim`-clips voor SpriteRenderer en UI Image. Het pakket bevat ook WAV-audio, afspeelscript en metadata. De browsercontrole (`npm run test:keyboard-sprites`, Chrome vereist; eventueel `CHROME_PATH` instellen) vergelijkt PNG-frames en spritesheetcellen pixel voor pixel en controleert effectranden, instellingen en het gedownloade ZIP-pakket.
+
 ### Airline Website & Ticket (afbeeldingen)
 Kies bij **Nieuw project** voor **Airline Website & Ticket**. Maak een fictieve airline-homepage met zichtbare taalvlaggen en een zelfgetekende Berlijn-illustratie, of een bijpassende boardingpass. De Dom, Fernsehturm, Brandenburger Tor en Spree worden scherp op elke exportresolutie getekend, met één doorlopend kleurverloop van donkerblauw naar lichtblauw. De skyline blijft zichtbaar boven het zoekformulier. De standaardnaam is **Airline**. De homepage toont drie aanpasbare vluchtkeuzes die dezelfde route gebruiken als het zoekformulier. Vlucht 1 levert de gegevens voor de boardingpass.
 
