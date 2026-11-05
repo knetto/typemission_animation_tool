@@ -45,6 +45,7 @@ function newProjectDialog(folderLabel = '') {
       ['keyboard', 'Toetsenbord Stickers', 'Kies QWERTY, AZERTY of QWERTZ en exporteer een sticker-animatie per toets.', 'keyboard'],
       ['hack', 'Gehackt Scherm', 'Greenscreen, zwart of afbeelding → glitch → YOU ARE HACKED! met vliegende code.', 'alert'],
       ['airline', 'Airline Website & Ticket', 'Maak een airline-homepage en boardingpass naar Berlijn. Exporteer als afbeelding.', 'globe'],
+      ['matrix', 'Hacking Code (Loop)', 'Vallende groene hacking-cijfers op zwart, transparant, green- of bluescreen. Loop-video of GIF.', 'matrix'],
     ].map(([key, label, desc, ico]) => h('button', {
       type: 'button', class: `project-type-choice${key === type ? ' on' : ''}`, 'aria-pressed': String(key === type), 'data-type': key,
       onclick: () => {
@@ -711,7 +712,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
           h('div', {},
             h('div', { class: 'plus' }, icon('plus')),
             h('div', { style: { marginTop: '12px', fontWeight: 600 } }, activeFolderName ? `Nieuw project in "${activeFolderName}"` : 'Nieuw project'),
-            h('div', { class: 'hint' }, 'Audio, File Terminal, Toetsenbord, Gehackt Scherm of Airline')
+            h('div', { class: 'hint' }, 'Audio, File Terminal, Toetsenbord, Gehackt Scherm, Airline of Hacking Code')
           )
         ),
         h('div', { class: 'card card-new card-new-folder glass', id: 'card-new-folder', onclick: () => createFolder(currentFolderId), style: { '--i': 1 } },
@@ -888,7 +889,12 @@ export async function mount(root, { tab = 'projects' } = {}) {
       thumb.replaceChildren(icon('globe'), h('strong', {}, !p.airline_opts?.airline || p.airline_opts.airline === 'AEROVIA' ? 'Airline' : p.airline_opts.airline), h('span', { class: 'file-project-label' }, `${p.airline_opts?.originCode || 'LHR'} → ${p.airline_opts?.destinationCode || 'BER'}`));
       thumb.classList.add('airline-project-thumb');
     }
-    const hackBg = { green: 'Greenscreen', blue: 'Bluescreen', black: 'Zwart', image: 'Afbeelding' }[p.hack_opts?.bgMode || 'green'] || 'Greenscreen';
+    if (p.type === 'matrix') {
+      thumb.replaceChildren(icon('matrix'), h('span', { class: 'file-project-label' }, '01 10 MATRIX LOOP'));
+      thumb.classList.add('matrix-project-thumb');
+    }
+    const hackBg = { green: 'Greenscreen', blue: 'Bluescreen', black: 'Zwart', image: 'Afbeelding', transparent: 'Transparant' }[p.hack_opts?.bgMode || 'green'] || 'Greenscreen';
+    const matrixBg = { black: 'Zwart', transparent: 'Transparant', green: 'Greenscreen', blue: 'Bluescreen' }[p.matrix_opts?.bgMode || 'black'] || 'Zwart';
     const kbLayout = (p.keyboard_opts?.layout || 'qwerty').toUpperCase();
     const kbCount = Array.isArray(p.keyboard_opts?.selectedKeys) ? p.keyboard_opts.selectedKeys.length : 26;
     const fileSub = fileVariant === 'login_log'
@@ -934,8 +940,8 @@ export async function mount(root, { tab = 'projects' } = {}) {
         onclick: (e) => { e.stopPropagation(); projSearch = ''; setCurrentFolder(p.folder_id); paintProjects(); },
       }, icon('folder'), h('span', {}, folderPath)) : null,
       h('div', { class: 'card-meta' },
-        h('span', {}, p.type === 'airline' ? 'Airline Website & Ticket' : p.type === 'hack' ? 'Gehackt Scherm' : p.type === 'keyboard' ? 'Toetsenbord Stickers' : p.type === 'file' ? 'File Terminal' : 'Audio Terminal'),
-        h('span', {}, p.type === 'airline' ? `${p.airline_opts?.origin || 'London'} → ${p.airline_opts?.destination || 'Berlin'}` : p.type === 'hack' ? `Start: ${hackBg}` : p.type === 'keyboard' ? `${kbLayout} · ${kbCount} toetsen` : p.type === 'file' ? fileSub : `${p.asset_count} audio`),
+        h('span', {}, p.type === 'matrix' ? 'Hacking Code (Loop)' : p.type === 'airline' ? 'Airline Website & Ticket' : p.type === 'hack' ? 'Gehackt Scherm' : p.type === 'keyboard' ? 'Toetsenbord Stickers' : p.type === 'file' ? 'File Terminal' : 'Audio Terminal'),
+        h('span', {}, p.type === 'matrix' ? `${matrixBg} · ${p.matrix_opts?.duration || 4}s loop` : p.type === 'airline' ? `${p.airline_opts?.origin || 'London'} → ${p.airline_opts?.destination || 'Berlin'}` : p.type === 'hack' ? `Start: ${hackBg}` : p.type === 'keyboard' ? `${kbLayout} · ${kbCount} toetsen` : p.type === 'file' ? fileSub : `${p.asset_count} audio`),
         p.export_count ? h('span', {}, `🎞 ${p.export_count}`) : null,
         p.duration ? h('span', {}, fmtTime(p.duration)) : null),
       h('div', { class: 'card-meta', style: { marginTop: '6px', fontSize: '12px' } }, h('span', {}, 'Bewerkt ' + fmtDate(p.updated_at))));
@@ -958,7 +964,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
   async function duplicate(p, targetFolderId = p.folder_id ?? null) {
     const full = await api.project(p.id);
     const copy = await api.createProject({ name: `${p.name} (kopie)`, scene: p.scene, type: p.type, folder_id: targetFolderId });
-    await api.updateProject(copy.id, { scene_opts: full.scene_opts, file_opts: full.file_opts, keyboard_opts: full.keyboard_opts, hack_opts: full.hack_opts, airline_opts: full.airline_opts });
+    await api.updateProject(copy.id, { scene_opts: full.scene_opts, file_opts: full.file_opts, keyboard_opts: full.keyboard_opts, hack_opts: full.hack_opts, airline_opts: full.airline_opts, matrix_opts: full.matrix_opts });
     toast('Project gedupliceerd', 'ok'); renderProjects();
   }
 
@@ -982,6 +988,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
             keyboard_opts: full.keyboard_opts,
             hack_opts: full.hack_opts,
             airline_opts: full.airline_opts,
+            matrix_opts: full.matrix_opts,
           });
         }
         const childFolders = allFolders.filter((f) => (f.parent_id ?? null) === srcFolder.id);

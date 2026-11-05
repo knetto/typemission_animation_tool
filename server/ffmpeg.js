@@ -47,3 +47,16 @@ export function pngSequenceToWebm(framePattern, fps, audioPath, outPath) {
     outPath,
   ]);
 }
+
+// Looping animated GIF from PNG sequence (supports both opaque and transparent backgrounds via palettegen/paletteuse).
+export function pngSequenceToGif(framePattern, fps, outPath, { transparent = false } = {}) {
+  const filter = transparent
+    ? 'split[s0][s1];[s0]palettegen=reserve_transparent=1:stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle:alpha_threshold=24'
+    : 'split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle';
+  return runFfmpeg([
+    '-framerate', String(fps), '-i', framePattern,
+    '-vf', filter,
+    '-loop', '0',
+    outPath,
+  ]);
+}

@@ -100,16 +100,16 @@ export async function renderCanvasExport({ projectId, canvas, scene, soundtrack,
   return result;
 }
 
-// Transparent export: canvas frames → PNG → server → WebM VP9/Opus or MOV ProRes/PCM.
+// Transparent / frame-sequence export: canvas frames → PNG → server → WebM VP9/Opus, MOV ProRes/PCM, or looping GIF.
 // H.264/WebCodecs has no alpha channel, so every frame is uploaded losslessly as PNG in batches.
-export async function renderCanvasExportMov({ projectId, canvas, scene, soundtrack, duration, mode = 'hack', format = 'mov', width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
+export async function renderCanvasExportMov({ projectId, canvas, scene, soundtrack, duration, mode = 'hack', format = 'mov', transparent = true, width = 1920, height = 1080, fps = 30, onProgress = () => {}, signal }) {
   canvas.width = width; canvas.height = height;
   const frames = Math.ceil(duration * fps);
   const abortErr = () => new DOMException('Geannuleerd', 'AbortError');
   const json = async (r, fallback) => { const b = await r.json().catch(() => ({})); if (!r.ok) throw new Error(b.error || fallback); return b; };
 
-  onProgress(0, `Preparing transparent ${format.toUpperCase()}…`);
-  const { token } = await json(await fetch(`/api/projects/${projectId}/exports/mov`, { method: 'POST', signal }), 'Could not start transparent export');
+  onProgress(0, format === 'gif' ? 'GIF-frames voorbereiden…' : `Preparing transparent ${format.toUpperCase()}…`);
+  const { token } = await json(await fetch(`/api/projects/${projectId}/exports/mov`, { method: 'POST', signal }), 'Could not start export');
   const toPng = () => new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('PNG encoding failed'))), 'image/png'));
   const upload = (batch) => {
     const fd = new FormData();
@@ -140,12 +140,13 @@ export async function renderCanvasExportMov({ projectId, canvas, scene, soundtra
     }
     await inFlight;
 
-    onProgress(0.88, format === 'webm' ? 'Building compact WebM (alpha)…' : 'Building ProRes 4444 MOV (alpha)…');
+    onProgress(0.88, format === 'gif' ? 'Loopende GIF opbouwen…' : format === 'webm' ? 'Building compact WebM (alpha)…' : 'Building ProRes 4444 MOV (alpha)…');
     const fd = new FormData();
     fd.append('format', format);
-    fd.append('audio', encodeWav(soundtrack, SR), 'audio.wav');
+    fd.append('transparent', transparent ? '1' : '0');
+    if (soundtrack?.length && format !== 'gif') fd.append('audio', encodeWav(soundtrack, SR), 'audio.wav');
     fd.append('scene', mode); fd.append('width', width); fd.append('height', height); fd.append('fps', fps); fd.append('duration', duration.toFixed(2));
-    const result = await json(await fetch(`/api/exports/mov/${token}/finish`, { method: 'POST', body: fd, signal }), 'Transparent export failed');
+    const result = await json(await fetch(`/api/exports/mov/${token}/finish`, { method: 'POST', body: fd, signal }), 'Export failed');
     ok = true;
     onProgress(1, 'Done!');
     return result;

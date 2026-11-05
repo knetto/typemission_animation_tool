@@ -86,6 +86,7 @@ export function openDb(file) {
   if (!columns.includes('keyboard_opts')) db.exec("ALTER TABLE projects ADD COLUMN keyboard_opts TEXT NOT NULL DEFAULT '{}'");
   if (!columns.includes('hack_opts')) db.exec("ALTER TABLE projects ADD COLUMN hack_opts TEXT NOT NULL DEFAULT '{}'");
   if (!columns.includes('airline_opts')) db.exec("ALTER TABLE projects ADD COLUMN airline_opts TEXT NOT NULL DEFAULT '{}'");
+  if (!columns.includes('matrix_opts')) db.exec("ALTER TABLE projects ADD COLUMN matrix_opts TEXT NOT NULL DEFAULT '{}'");
   if (!columns.includes('folder_id')) db.exec("ALTER TABLE projects ADD COLUMN folder_id INTEGER REFERENCES project_folders(id) ON DELETE SET NULL");
   return db;
 }
@@ -98,6 +99,7 @@ export const parseProject = (row) => row && ({
   keyboard_opts: safeJson(row.keyboard_opts, {}),
   hack_opts: safeJson(row.hack_opts, {}),
   airline_opts: safeJson(row.airline_opts, {}),
+  matrix_opts: safeJson(row.matrix_opts, {}),
 });
 
 function safeJson(s, fallback) {

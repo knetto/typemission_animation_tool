@@ -32,6 +32,7 @@ export async function mount(root, { id, signal, loading }) {
   if (project.type === 'file') return (await import('./files.js')).mount(root, { id, project });
   if (project.type === 'keyboard') return (await import('./keyboard.js')).mount(root, { id, project });
   if (project.type === 'hack') return (await import('./hack.js')).mount(root, { id, project });
+  if (project.type === 'matrix') return (await import('./matrix.js')).mount(root, { id, project });
   let assets = project.assets || [];
   let customSfx = await api.sfx().catch(() => []);
   if (signal?.aborted) return;

@@ -322,5 +322,96 @@ test('nested project folders CRUD, cycle prevention, project assignment and safe
   assert.equal(projAfter.folder_id, f1.body.id);
 });
 
+test('Matrix / Hacking Code Loop project persists matrix_opts, loops seamlessly, and exports looping GIF (opaque & transparent)', async () => {
+  const { normalizeMatrixOpts, matrixSchedule, createMatrixScene } = await import('../../public/js/matrix/scene.js');
+
+  // 1. Create & update matrix project
+  const created = await json('POST', '/api/projects', {
+    name: 'Groene Cijfers Loop',
+    type: 'matrix',
+    matrix_opts: { bgMode: 'green', charset: 'numbers', duration: 3, speed: 1.2 },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.type, 'matrix');
+  assert.equal(created.body.matrix_opts.bgMode, 'green');
+  assert.equal(created.body.matrix_opts.charset, 'numbers');
+
+  const updated = await json('PUT', `/api/projects/${created.body.id}`, {
+    matrix_opts: { bgMode: 'transparent', charset: 'binary', duration: 2.5, codeColor: '#00ff66' },
+    duration: 2.5,
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.matrix_opts.bgMode, 'transparent');
+  assert.equal(updated.body.duration, 2.5);
+
+  // 2. Verify mathematical seamless loop equivalence between t = 0 and t = duration
+  const opts = normalizeMatrixOpts(updated.body.matrix_opts);
+  const sched = matrixSchedule(opts);
+  assert.equal(sched.total, 2.5);
+  assert.equal(sched.loop, true);
+
+  const ops = [];
+  const fakeCtx = {
+    save() {},
+    restore() {},
+    setTransform() {},
+    clearRect(x, y, w, h) { ops.push(['clear', x, y, w, h]); },
+    fillRect(x, y, w, h) { ops.push(['rect', x, y, w, h, this.fillStyle]); },
+    fillText(ch, x, y) { ops.push(['text', ch, Math.round(x), Math.round(y), this.fillStyle, Math.round((this.globalAlpha ?? 1) * 1000)]); },
+  };
+  const fakeCanvas = { width: 640, height: 360, getContext: () => fakeCtx };
+  const scene = createMatrixScene(fakeCanvas, opts);
+
+  ops.length = 0;
+  scene.draw(0);
+  const frameStart = JSON.stringify(ops);
+  assert.ok(ops.length > 10, 'Expected falling numbers to be drawn');
+
+  ops.length = 0;
+  scene.draw(sched.total);
+  const frameEnd = JSON.stringify(ops);
+  assert.equal(frameStart, frameEnd, 'Frame at t=0 and t=duration must be identical for a seamless loop');
+
+  // 3. Export looping GIF (both opaque and transparent)
+  const gifFramesDir = path.join(tmp, 'gif-frames');
+  fs.mkdirSync(gifFramesDir);
+  await runFfmpeg([
+    '-f', 'lavfi',
+    '-i', 'color=c=0x00ff66@0.85:s=64x64:r=15:d=0.6,format=rgba',
+    '-start_number', '0',
+    path.join(gifFramesDir, '%06d.png'),
+  ]);
+
+  for (const transparent of ['0', '1']) {
+    const started = await json('POST', `/api/projects/${created.body.id}/exports/mov`);
+    assert.equal(started.status, 201);
+    const endpoint = `/api/exports/mov/${started.body.token}`;
+    const frames = new FormData();
+    for (const name of fs.readdirSync(gifFramesDir)) {
+      frames.append('frames', new Blob([fs.readFileSync(path.join(gifFramesDir, name))], { type: 'image/png' }), name);
+    }
+    assert.equal((await fetch(base + endpoint + '/frames', { method: 'POST', body: frames })).status, 200);
+
+    const body = new FormData();
+    body.append('format', 'gif');
+    body.append('transparent', transparent);
+    body.append('scene', 'matrix');
+    body.append('width', '64');
+    body.append('height', '64');
+    body.append('fps', '15');
+    body.append('duration', '0.6');
+    const response = await fetch(base + endpoint + '/finish', { method: 'POST', body });
+    const exp = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(exp));
+    assert.ok(exp.filename.endsWith('.gif'));
+    const dl = await fetch(`${base}/files/exports/${exp.filename}`);
+    assert.equal(dl.status, 200);
+    const buf = Buffer.from(await dl.arrayBuffer());
+    assert.equal(buf.subarray(0, 6).toString('ascii'), 'GIF89a');
+    assert.ok(buf.length > 200);
+  }
+});
+
+
 
 

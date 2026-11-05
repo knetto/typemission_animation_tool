@@ -399,6 +399,7 @@ export function iconSvg(name) {
     alert: '<path d="M12 3.5L22 20.5H2L12 3.5z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M12 10v4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17.6" r="1.2" fill="currentColor"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="12" cy="16" r="1.3" fill="currentColor"/>',
     unlock: '<rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M8 11V7a4 4 0 017.4-2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><circle cx="12" cy="16" r="1.3" fill="currentColor"/>',
+    matrix: '<path d="M6 3v11m0 0l-2.2-2.2M6 14l2.2-2.2M12 6v13m0 0l-2.2-2.2M12 19l2.2-2.2M18 4v11m0 0l-2.2-2.2M18 15l2.2-2.2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="18.5" r="1.2" fill="currentColor"/><circle cx="18" cy="19.5" r="1.2" fill="currentColor"/>',
   }[name] || '';
   return `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">${p}</svg>`;
 }

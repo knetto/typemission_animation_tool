@@ -6,7 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb, parseProject } from './db.js';
-import { muxVideoAudio, runFfmpeg, pngSequenceToProRes, pngSequenceToWebm } from './ffmpeg.js';
+import { muxVideoAudio, runFfmpeg, pngSequenceToProRes, pngSequenceToWebm, pngSequenceToGif } from './ffmpeg.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -139,23 +139,24 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
   // ---------- projects ----------
   app.get('/api/projects', (_req, res) => {
     const rows = db.prepare(`
-      SELECT p.id, p.name, p.type, p.scene, p.duration, p.folder_id, p.file_opts, p.keyboard_opts, p.hack_opts, p.airline_opts, p.created_at, p.updated_at,
+      SELECT p.id, p.name, p.type, p.scene, p.duration, p.folder_id, p.file_opts, p.keyboard_opts, p.hack_opts, p.airline_opts, p.matrix_opts, p.created_at, p.updated_at,
         (SELECT COUNT(*) FROM assets a WHERE a.project_id = p.id) AS asset_count,
         (SELECT COUNT(*) FROM project_images i WHERE i.project_id = p.id) AS image_count,
         (SELECT COUNT(*) FROM exports e WHERE e.project_id = p.id) AS export_count
       FROM projects p ORDER BY p.updated_at DESC`).all();
-    res.json(rows.map((r) => { const parsed = parseProject(r); return { ...r, file_opts: parsed.file_opts, keyboard_opts: parsed.keyboard_opts, hack_opts: parsed.hack_opts, airline_opts: parsed.airline_opts }; }));
+    res.json(rows.map((r) => { const parsed = parseProject(r); return { ...r, file_opts: parsed.file_opts, keyboard_opts: parsed.keyboard_opts, hack_opts: parsed.hack_opts, airline_opts: parsed.airline_opts, matrix_opts: parsed.matrix_opts }; }));
   });
 
   app.post('/api/projects', (req, res) => {
     const name = String(req.body?.name || 'Nieuw project').slice(0, 120);
     const scene = ['transmission', 'urgent', 'ai', 'steampunk'].includes(req.body?.scene) ? req.body.scene : 'transmission';
-    const type = ['audio', 'file', 'keyboard', 'hack', 'airline'].includes(req.body?.type) ? req.body.type : 'audio';
+    const type = ['audio', 'file', 'keyboard', 'hack', 'airline', 'matrix'].includes(req.body?.type) ? req.body.type : 'audio';
     const folderId = validFolderId(req.body?.folder_id);
     const fileOpts = req.body?.file_opts && typeof req.body.file_opts === 'object' ? JSON.stringify(req.body.file_opts) : '{}';
     const hackOpts = req.body?.hack_opts && typeof req.body.hack_opts === 'object' ? JSON.stringify(req.body.hack_opts) : '{}';
     const airlineOpts = req.body?.airline_opts && typeof req.body.airline_opts === 'object' ? JSON.stringify(req.body.airline_opts) : '{}';
-    const info = db.prepare('INSERT INTO projects (name, scene, type, folder_id, file_opts, hack_opts, airline_opts) VALUES (?, ?, ?, ?, ?, ?, ?)').run(name, scene, type, folderId, fileOpts, hackOpts, airlineOpts);
+    const matrixOpts = req.body?.matrix_opts && typeof req.body.matrix_opts === 'object' ? JSON.stringify(req.body.matrix_opts) : '{}';
+    const info = db.prepare('INSERT INTO projects (name, scene, type, folder_id, file_opts, hack_opts, airline_opts, matrix_opts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(name, scene, type, folderId, fileOpts, hackOpts, airlineOpts, matrixOpts);
     res.status(201).json(parseProject(db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid)));
   });
 
@@ -173,7 +174,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     if (!p) return res.status(404).json({ error: 'Project niet gevonden' });
     const b = req.body || {};
     const nextFolderId = b.folder_id !== undefined ? validFolderId(b.folder_id) : p.folder_id;
-    db.prepare(`UPDATE projects SET name = ?, scene = ?, folder_id = ?, scene_opts = ?, timeline = ?, file_opts = ?, keyboard_opts = ?, hack_opts = ?, airline_opts = ?, duration = ?, updated_at = ? WHERE id = ?`).run(
+    db.prepare(`UPDATE projects SET name = ?, scene = ?, folder_id = ?, scene_opts = ?, timeline = ?, file_opts = ?, keyboard_opts = ?, hack_opts = ?, airline_opts = ?, matrix_opts = ?, duration = ?, updated_at = ? WHERE id = ?`).run(
       b.name !== undefined ? String(b.name).slice(0, 120) : p.name,
       ['transmission', 'urgent', 'ai', 'steampunk'].includes(b.scene) ? b.scene : p.scene,
       nextFolderId,
@@ -183,6 +184,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
       b.keyboard_opts !== undefined ? JSON.stringify(b.keyboard_opts) : p.keyboard_opts,
       b.hack_opts !== undefined ? JSON.stringify(b.hack_opts) : p.hack_opts,
       b.airline_opts !== undefined ? JSON.stringify(b.airline_opts) : p.airline_opts,
+      b.matrix_opts !== undefined ? JSON.stringify(b.matrix_opts) : p.matrix_opts,
       Number.isFinite(b.duration) ? b.duration : p.duration,
       now(), p.id,
     );
@@ -652,7 +654,7 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
     const audioOnlyExport = req.body?.scene === 'audio';
     if (!project || (audioOnlyExport ? !audio || video : !video)) { await cleanup(); return res.status(400).json({ error: 'Exportbestanden ontbreken of project bestaat niet' }); }
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'transmissie';
-    const scene = audioOnlyExport ? 'audio' : ['transmission', 'urgent', 'ai', 'steampunk', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
+    const scene = audioOnlyExport ? 'audio' : ['transmission', 'urgent', 'ai', 'steampunk', 'file', 'keyboard', 'hack', 'matrix'].includes(req.body.scene) ? req.body.scene : project.scene;
     const format = audioOnlyExport ? (req.body.format === 'mp3' ? 'mp3' : 'wav') : 'mp4';
     const keySlug = req.body.keyLabel ? '-toets-' + String(req.body.keyLabel).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) : '';
     const partSlug = req.body.partLabel ? '-' + String(req.body.partLabel).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) : '';
@@ -727,14 +729,19 @@ export function createApp({ storageDir = path.join(ROOT, 'storage') } = {}) {
       return res.status(400).json({ error: 'Geen frames ontvangen of project bestaat niet' });
     }
     const slug = project.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'transmissie';
-    const scene = ['transmission', 'urgent', 'ai', 'steampunk', 'file', 'keyboard', 'hack'].includes(req.body.scene) ? req.body.scene : project.scene;
-    const fps = [24, 25, 30, 50, 60].includes(Number(req.body.fps)) ? Number(req.body.fps) : 30;
-    const format = req.body.format === 'webm' ? 'webm' : 'mov';
-    const filename = `${slug}-${scene}-transparant-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${format}`;
+    const scene = ['transmission', 'urgent', 'ai', 'steampunk', 'file', 'keyboard', 'hack', 'matrix'].includes(req.body.scene) ? req.body.scene : project.scene;
+    const fps = [10, 12, 15, 20, 24, 25, 30, 50, 60].includes(Number(req.body.fps)) ? Number(req.body.fps) : 30;
+    const format = ['webm', 'mov', 'gif'].includes(req.body.format) ? req.body.format : 'mov';
+    const suffixLabel = format === 'gif' ? (req.body.transparent === '1' ? 'loop-transparant' : 'loop') : 'transparant';
+    const filename = `${slug}-${scene}-${suffixLabel}-${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${format}`;
     const outPath = path.join(dirs.exports, filename);
     try {
-      const encode = format === 'webm' ? pngSequenceToWebm : pngSequenceToProRes;
-      await encode(path.join(s.dir, '%06d.png'), fps, audio?.path, outPath);
+      if (format === 'gif') {
+        await pngSequenceToGif(path.join(s.dir, '%06d.png'), fps, outPath, { transparent: req.body.transparent === '1' });
+      } else {
+        const encode = format === 'webm' ? pngSequenceToWebm : pngSequenceToProRes;
+        await encode(path.join(s.dir, '%06d.png'), fps, audio?.path, outPath);
+      }
       const size = (await fs.promises.stat(outPath)).size;
       const info = db.prepare('INSERT INTO exports (project_id, filename, scene, width, height, fps, duration, size) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(project.id, filename, scene, Number(req.body.width) || 1920, Number(req.body.height) || 1080, fps, Number(req.body.duration) || 0, size);
