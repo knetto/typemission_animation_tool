@@ -6354,14 +6354,15 @@ kbd {
 }
 
 .kb-grid-wrap {
+  --kb-unit: 48px;
   display: grid;
   gap: 6px;
-  padding: 16px;
-  max-width: 830px;
+  padding: 14px 16px;
+  max-width: 860px;
   margin: 0 auto;
-  background: #0a101f;
-  border: 1px solid #24334f;
-  border-radius: 12px;
+  background: #484848;
+  border: 8px solid #3a3a3a;
+  border-radius: 18px;
   overflow-x: auto;
 }
 
@@ -6374,14 +6375,14 @@ kbd {
 .kb-key {
   position: relative;
   flex: var(--kw, 1) 1 0;
-  height: 48px;
+  height: var(--kb-unit, 48px);
   min-width: 34px;
-  border-radius: 5px;
-  border: 1px solid #252d3f;
-  border-bottom: 3px solid #181e2c;
-  background: #131824;
-  color: #58657f;
-  opacity: 0.55;
+  border-radius: 6px;
+  border: 0;
+  background: #353535;
+  color: #ffffff;
+  font-family: Arial, Helvetica, sans-serif;
+  opacity: 1;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -6389,24 +6390,27 @@ kbd {
   justify-content: center;
   padding: 4px;
   user-select: none;
-  transition: transform 0.12s, background 0.15s, box-shadow 0.15s, border-color 0.15s, opacity 0.15s, color 0.15s;
+  transition: transform 0.12s, background 0.15s, filter 0.15s, box-shadow 0.15s;
+}
+
+.kb-key.modifier {
+  background: #363636;
 }
 
 .kb-key:hover {
-  opacity: 0.88;
+  filter: brightness(1.12);
   transform: translateY(-1px);
-  border-color: #465678;
-  color: #b8c7e4;
 }
 
 .kb-key.selected {
   opacity: 1;
-  background: linear-gradient(145deg, color-mix(in srgb, var(--fc) 88%, #ffffff), var(--fc));
-  border-color: rgba(255, 255, 255, 0.65);
-  border-bottom: 4px solid color-mix(in srgb, var(--fc) 72%, #000000);
+  background: linear-gradient(140deg, color-mix(in srgb, var(--fc) 90%, #ffffff) 0%, var(--fc) 48%, color-mix(in srgb, var(--fc) 93%, #000000) 100%);
+  box-shadow: none;
   color: #ffffff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-  box-shadow: 0 4px 14px -4px var(--fc);
+}
+
+.kb-grid-wrap.no-shine .kb-key.selected {
+  background: var(--fc);
 }
 
 .kb-key.previewing {
@@ -6416,14 +6420,7 @@ kbd {
 }
 
 .kb-key.homing::after {
-  content: '';
-  position: absolute;
-  bottom: 5px;
-  width: 12px;
-  height: 2px;
-  border-radius: 2px;
-  background: currentColor;
-  opacity: 0.65;
+  display: none;
 }
 
 .kb-key-sub {
@@ -6434,9 +6431,20 @@ kbd {
 }
 
 .kb-key-main {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 17px;
+  font-weight: 400;
   line-height: 1.1;
+}
+
+.kb-key.modifier .kb-key-main {
+  font-size: 12px;
+}
+
+.kb-key.iso-enter .kb-key-main {
+  position: absolute;
+  top: calc(var(--kb-unit, 48px) / 2);
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .kb-key-spy-logo {
@@ -6458,28 +6466,28 @@ kbd {
   font-size: 9px;
   font-weight: 800;
   line-height: 1;
-  background: rgba(0, 0, 0, 0.32);
+  background: rgba(0, 0, 0, 0.28);
   padding: 2px 3.5px;
   border-radius: 5px;
 }
 
 .kb-iso-spacer {
-  width: calc(var(--kb-unit) * var(--kw, 1.25) + (var(--kw, 1.25) - 1) * 5px);
-  height: var(--kb-unit);
+  flex: var(--kw, 1) 1 0;
+  min-width: 34px;
+  height: var(--kb-unit, 48px);
   pointer-events: none;
-  flex-shrink: 0;
 }
 
 .kb-key.iso-enter {
-  height: calc(var(--kb-unit) * 2 + 5px);
-  margin-bottom: calc(-1 * (var(--kb-unit) + 5px));
+  height: calc(var(--kb-unit, 48px) * 2 + 6px);
+  margin-bottom: calc(-1 * (var(--kb-unit, 48px) + 6px));
   z-index: 3;
   background: transparent !important;
   border: 0 !important;
   box-shadow: none !important;
   outline: none !important;
-  padding-left: 11px;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 17% 100%, 17% 47%, 0 47%);
+  padding-left: 0;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 33% 100%, 33% 47%, 0 47%);
 }
 
 .kb-key.iso-enter .kb-iso-shape {
@@ -6496,25 +6504,23 @@ kbd {
 }
 
 .kb-key.iso-enter .kb-iso-shape path {
-  fill: #131824;
-  stroke: #252d3f;
-  stroke-width: 1.5;
+  fill: #363636;
+  stroke: none;
   transition: fill 0.15s, stroke 0.15s;
 }
 
 .kb-key.iso-enter:hover .kb-iso-shape path {
-  stroke: #465678;
+  filter: brightness(1.12);
 }
 
 .kb-key.iso-enter.selected .kb-iso-shape path {
   fill: var(--fc);
-  stroke: rgba(255, 255, 255, 0.72);
-  stroke-width: 1.8;
+  stroke: none;
 }
 
 .kb-key.iso-enter.previewing .kb-iso-shape path {
   stroke: #ffffff;
-  stroke-width: 3;
+  stroke-width: 2.5;
 }
 
 .kb-preview-pill {

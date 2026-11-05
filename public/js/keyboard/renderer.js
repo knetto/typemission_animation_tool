@@ -61,50 +61,69 @@ function drawCoverImage(ctx, img, rx, ry, rw, rh) {
 }
 
 // Trace either a standard rounded rectangle or a 6-corner stepped L-shaped ISO Enter key
-function traceKeyShape(ctx, x, y, w, h, r, isoStepX = 0, isoStepY = 0) {
+function traceKeyShape(ctx, x, y, w, h, r = 13.125, isoStepX = 0, isoStepY = 0) {
   ctx.beginPath();
   if (isoStepX <= 0 || isoStepY <= 0) {
     ctx.roundRect(x, y, w, h, r);
     return;
   }
-  const rOuter = Math.min(r, w * 0.25, h * 0.2);
-  const rInner = Math.min(rOuter * 0.75, isoStepX * 0.45, isoStepY * 0.45);
+  const rOuter = Math.min(r, w * 0.25, h * 0.2, isoStepX * 0.5, isoStepY * 0.45);
   ctx.moveTo(x + rOuter, y);
   ctx.arcTo(x + w, y, x + w, y + h, rOuter);
   ctx.arcTo(x + w, y + h, x + isoStepX, y + h, rOuter);
   ctx.arcTo(x + isoStepX, y + h, x + isoStepX, y + isoStepY, rOuter);
-  ctx.arcTo(x + isoStepX, y + isoStepY, x, y + isoStepY, rInner);
+  ctx.lineTo(x + isoStepX, y + isoStepY);
   ctx.arcTo(x, y + isoStepY, x, y, rOuter);
   ctx.arcTo(x, y, x + w, y, rOuter);
   ctx.closePath();
 }
 
-// Compute pixel rectangles for all keys in the 1920x1080 stage
+// Compute pixel rectangles for all keys in the 1920x1080 stage (1:1 scaled from 1024x576 reference by 1.875x)
 export function computeKeyRects(layoutId) {
-  const keys = getFlatKeys(layoutId);
-  const unitW = 102;
-  const rowH = 102;
-  const gap = 10;
-  const totalW = 15 * unitW;
-  const totalH = 5 * rowH;
-  const startX = (W - totalW) / 2;
-  const startY = (H - totalH) / 2 + 28;
+  const layout = getLayout(layoutId);
+  const flatKeys = getFlatKeys(layoutId);
+  const S = W / 1024; // 1.875
+  const unitW = (160 / 3) * S; // 100px
+  const keyH = (160 / 3) * S; // 100px
+  const rowPitchY = 60 * S; // 112.5px
+  const startX = 70 * S; // 131.25px
+  const rowSpanW = 884 * S; // 1657.5px (right edge at 954 * S = 1788.75px)
+  const startY = 130 * S; // 243.75px
+
+  const rowXPositions = layout.rows.map((row, rIdx) => {
+    const prevRowIso = rIdx > 0 ? layout.rows[rIdx - 1]?.find((k) => k.isoEnter) : null;
+    const isoBottomW = prevRowIso ? (prevRowIso.wBottom || 1) * unitW : 0;
+    const slotCount = row.length + (prevRowIso ? 1 : 0);
+    const sumKeyW = row.reduce((acc, k) => acc + k.w * unitW, 0) + isoBottomW;
+    const gap = slotCount > 1 ? (rowSpanW - sumKeyW) / (slotCount - 1) : 0;
+    let curX = startX;
+    return row.map((k) => {
+      const x = curX;
+      const w = k.w * unitW;
+      curX += w + gap;
+      return { x, w };
+    });
+  });
 
   return {
     boardRect: {
-      x: startX - 38,
-      y: startY - 38,
-      w: totalW + 76 - gap,
-      h: totalH + 76 - gap,
+      x: 45 * S,
+      y: 110 * S,
+      w: 934 * S,
+      h: 334 * S,
+      borderWidth: 10 * S,
+      outerRadius: 22 * S,
+      centerRadius: 17 * S,
     },
-    keys: keys.map((k) => {
+    keys: flatKeys.map((k) => {
       const isIso = Boolean(k.isoEnter);
-      const x = startX + k.unitX * unitW;
-      const y = startY + k.rowIndex * rowH;
-      const w = k.w * unitW - gap;
-      const h = isIso ? rowH * 2 - gap : rowH - gap;
-      const isoStepX = isIso ? (k.w - (k.wBottom || 1.25)) * unitW : 0;
-      const isoStepY = isIso ? rowH - gap : 0;
+      const pos = rowXPositions[k.rowIndex]?.[k.colIndex] || { x: startX + k.unitX * unitW, w: k.w * unitW };
+      const x = pos.x;
+      const w = pos.w;
+      const y = startY + k.rowIndex * rowPitchY;
+      const h = isIso ? rowPitchY + keyH : keyH;
+      const isoStepX = isIso ? (k.w - (k.wBottom || 1)) * unitW : 0;
+      const isoStepY = isIso ? keyH : 0;
       return {
         ...k,
         x,
@@ -143,112 +162,81 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       : opts.boardMode;
   const maskImageOnKeys = opts.bgMode === 'masked' && opts.maskMode === 'keys';
 
-  function drawKeycapBase(k, pressY = 0, highlightAlpha = 0, fingerColor = '#3b82f6') {
+  function isKeyLaneColored(k) {
+    const isModifier = k.kind === 'special' && k.id !== 'space';
+    if (k.id === targetKey?.id) {
+      return Boolean(opts.showLaneGuide || theme.allLanesColored);
+    }
+    if (isModifier) return false;
+    if (theme.allLanesColored) return true;
+    return Boolean(opts.showLaneGuide && k.finger === targetKey?.finger);
+  }
+
+  function drawKeyTypography(k, rx, ry, rw, rh, stepX = 0, stepY = 0, textColor = '#ffffff') {
+    const displayLabel = k.canvasLabel !== undefined ? k.canvasLabel : (k.blankKey ? '' : k.label);
+    if (!displayLabel && !k.spyIcon) return;
+
+    const textCenterX = rx + rw / 2;
+    const textCenterY = stepY > 0 ? ry + stepY / 2 : ry + rh / 2;
+
+    if (k.spyIcon) {
+      const logoW = Math.min(rw * 0.42, (rh * 0.50) / KEY_LOGO_ASPECT);
+      const logoH = logoW * KEY_LOGO_ASPECT;
+      drawLogo(g, textCenterX - logoW / 2, textCenterY - logoH / 2, logoW, textColor, logoH);
+      return;
+    }
+
+    const isWord = displayLabel.length > 2;
+    const fontSize = isWord ? 31 : 52;
+    g.fillStyle = textColor;
+    g.font = `400 ${fontSize}px Arial, Helvetica, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'alphabetic';
+    g.fillText(displayLabel, textCenterX, textCenterY + fontSize * 0.34);
+  }
+
+  function drawKeycapBase(k, pressY = 0, highlightAlpha = 0, fingerColor = '#456d74', { laneColored = false } = {}) {
     const x = k.x;
     const y = k.y + pressY;
     const w = k.w;
     const h = k.h;
     const stepX = k.isoStepX || 0;
     const stepY = k.isoStepY || 0;
-    const sideDepth = Math.max(2, 8 - pressY * 0.75);
+    const keyRadius = 13.125;
+    const isModifier = k.kind === 'special' && k.id !== 'space';
+    const baseKeyColor = isModifier ? (theme.keySpecial || '#363636') : (theme.keyTop || '#353535');
 
     g.save();
-    // Avoid semi-transparent outer shadow on greenscreen/cutout when board plate is hidden
-    if (!(isChromaOrCutout && effectiveBoardMode === 'hidden')) {
-      g.fillStyle = 'rgba(0, 0, 0, 0.38)';
-      traceKeyShape(g, x + 1, k.y + 4, w, h, 14, stepX, stepY);
-      g.fill();
+
+    let fillColor = laneColored ? fingerColor : baseKeyColor;
+    if (highlightAlpha > 0) {
+      fillColor = laneColored
+        ? mixHex(fingerColor, '#ffffff', highlightAlpha * 0.12)
+        : mixHex(baseKeyColor, fingerColor, clamp01(highlightAlpha * 0.38));
     }
 
-    // Fast GPU-friendly glow halo (avoids expensive CPU shadowBlur on wide keys like spacebar)
-    if (highlightAlpha > 0.05 && !(isChromaOrCutout && effectiveBoardMode === 'hidden')) {
-      g.fillStyle = rgba(fingerColor, highlightAlpha * 0.18);
-      traceKeyShape(g, x - 6, y - 6, w + 12, h + 12, 18, stepX, stepY > 0 ? stepY + 12 : 0);
-      g.fill();
-      g.fillStyle = rgba(fingerColor, highlightAlpha * 0.28);
-      traceKeyShape(g, x - 3, y - 3, w + 6, h + 6, 15, stepX, stepY > 0 ? stepY + 6 : 0);
-      g.fill();
-    }
-
-    // Keycap 3D bevel / side wall
-    g.fillStyle = highlightAlpha > 0 ? mixHex(theme.keySide, fingerColor, highlightAlpha * 0.45) : theme.keySide;
-    g.strokeStyle = highlightAlpha > 0 ? mixHex(theme.keyBorder, fingerColor, highlightAlpha * 0.85) : theme.keyBorder;
-    g.lineWidth = highlightAlpha > 0 ? 2.5 : 1.5;
-    traceKeyShape(g, x, y, w, h, 13, stepX, stepY);
-    g.fill();
-    g.stroke();
-
-    // Keycap top surface
-    const topX = x + 5;
-    const topY = y + 3;
-    const topW = w - 10;
-    const topH = h - 3 - sideDepth;
-    const topStepX = stepX > 0 ? stepX : 0;
-    const topStepY = stepY > 0 ? stepY - 3 - sideDepth : 0;
-    const topGrad = g.createLinearGradient(topX, topY, topX, topY + topH);
-    const cTop = highlightAlpha > 0 ? mixHex(theme.keyTop, fingerColor, highlightAlpha * 0.25) : theme.keyTop;
-    topGrad.addColorStop(0, mixHex(cTop, '#ffffff', 0.06));
-    topGrad.addColorStop(1, cTop);
-    g.fillStyle = topGrad;
-    traceKeyShape(g, topX, topY, topW, topH, 10, topStepX, topStepY);
+    g.fillStyle = fillColor;
+    traceKeyShape(g, x, y, w, h, keyRadius, stepX, stepY);
     g.fill();
 
     // If image is masked across the keycaps themselves ('keys' mask mode)
     if (maskImageOnKeys && bgImage) {
       g.save();
-      traceKeyShape(g, topX, topY, topW, topH, 10, topStepX, topStepY);
+      traceKeyShape(g, x, y, w, h, keyRadius, stepX, stepY);
       g.clip();
       drawCoverImage(g, bgImage, boardRect.x, boardRect.y - pressY, boardRect.w, boardRect.h);
       if (opts.bgImageDim > 0) {
         g.fillStyle = `rgba(0, 0, 0, ${opts.bgImageDim})`;
-        g.fillRect(topX, topY, topW, topH);
+        g.fillRect(x, y, w, h);
       }
       g.restore();
     }
 
-    // Subtle finger-lane color bar or bottom edge indicator if showLaneGuide is enabled
-    if (opts.showLaneGuide) {
-      const kColor = opts.fingerColors[k.finger] || '#3b82f6';
-      g.fillStyle = rgba(kColor, 0.42);
-      const barLeft = topX + topStepX + 10;
-      const barW = Math.max(12, topW - topStepX - 20);
-      g.beginPath();
-      g.roundRect(barLeft, topY + topH - 5, barW, 3, 1.5);
-      g.fill();
-    }
-
-    // Keycap typography or Spy mask icon (visible before sticker covers it)
-    const textCenterX = topX + (topStepX + topW) / 2;
-    g.fillStyle = theme.keyText;
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    if (k.spyIcon || k.id === 'win') {
-      const logoW = Math.min(topW * 0.42, (topH * 0.50) / KEY_LOGO_ASPECT);
-      const logoH = logoW * KEY_LOGO_ASPECT;
-      drawLogo(g, textCenterX - logoW / 2, topY + (topH - logoH) / 2, logoW, theme.keyText, logoH);
-    } else if (k.sub) {
-      g.font = '600 16px "Outfit", sans-serif';
-      g.fillStyle = theme.keySub;
-      g.fillText(k.sub, textCenterX, topY + topH * 0.30);
-      g.font = '700 24px "Outfit", sans-serif';
-      g.fillStyle = theme.keyText;
-      g.fillText(k.label, textCenterX, topY + topH * 0.67);
-    } else {
-      const isWord = k.label.length > 2;
-      g.font = isWord ? '600 18px "Outfit", sans-serif' : '700 28px "Outfit", sans-serif';
-      g.fillText(k.label, textCenterX, topY + topH * 0.5);
-    }
-
-    // Tactile homing bump on F and J
-    if (k.homing) {
-      g.fillStyle = rgba(theme.keyText, 0.45);
-      g.beginPath();
-      g.roundRect(topX + topW / 2 - 9, topY + topH - 11, 18, 2.5, 1.5);
-      g.fill();
-    }
+    // Single centered white key label (1-on-1 with reference image)
+    drawKeyTypography(k, x, y, w, h, stepX, stepY, theme.keyText || '#ffffff');
 
     g.restore();
-    return { topX, topY, topW, topH, topStepX, topStepY };
+    return { topX: x, topY: y, topW: w, topH: h, topStepX: stepX, topStepY: stepY };
   }
 
   // Draw a finished or partial sticker on top of a keycap
@@ -259,15 +247,14 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     blank = true,
   } = {}) {
     if (progress <= 0) return;
-    const { topX, topY, topW, topH, topStepX = 0, topStepY = 0 } = topRect;
-    const pad = 2;
-    const sx = topX + pad;
-    const sy = topY + pad;
-    const sw = topW - pad * 2;
-    const sh = topH - pad * 2;
-    const sStepX = topStepX > 0 ? topStepX : 0;
-    const sStepY = topStepY > 0 ? Math.max(8, topStepY - pad * 2) : 0;
-    const radius = 9;
+    const { topX: sx, topY: sy, topW: sw, topH: sh, topStepX: sStepX = 0, topStepY: sStepY = 0 } = topRect;
+    const radius = 13.125;
+
+    // Subtle vinyl sheen stays on stickered keys when stickerShine is enabled
+    const useShine = opts.stickerShine !== false;
+    const sheen = useShine
+      ? (progress < 1 ? 1 : (shineProgress >= 0 && shineProgress < 1 ? lerp(1, 0.75, easeInOutCubic(shineProgress)) : 0.75))
+      : 0;
 
     g.save();
 
@@ -308,64 +295,42 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       g.clip();
     }
 
-    // Main vinyl sticker body
-    const grad = g.createLinearGradient(sx, sy, sx + sw * 0.4, sy + sh);
-    grad.addColorStop(0, mixHex(color, '#ffffff', 0.22));
-    grad.addColorStop(0.5, color);
-    grad.addColorStop(1, mixHex(color, '#000000', 0.18));
-
-    g.fillStyle = grad;
+    // Main sticker body (no border/outline around the key)
+    if (sheen > 0.01) {
+      const grad = g.createLinearGradient(sx, sy, sx + sw * 0.45, sy + sh);
+      grad.addColorStop(0, mixHex(color, '#ffffff', 0.11 * sheen));
+      grad.addColorStop(0.48, color);
+      grad.addColorStop(1, mixHex(color, '#000000', 0.08 * sheen));
+      g.fillStyle = grad;
+    } else {
+      g.fillStyle = color;
+    }
     traceKeyShape(g, sx, sy, sw, sh, radius, sStepX, sStepY);
     g.fill();
     g.shadowBlur = 0;
     g.shadowOffsetY = 0;
 
-    // Crisp vinyl sticker inner rim highlight
-    g.strokeStyle = 'rgba(255, 255, 255, 0.38)';
-    g.lineWidth = 2;
-    traceKeyShape(g, sx + 1, sy + 1, sw - 2, sh - 2, radius - 1, sStepX, sStepY > 0 ? sStepY - 2 : 0);
-    g.stroke();
-
-    // Subtle matte-gloss texture sheen on top half
-    g.save();
-    traceKeyShape(g, sx + 2, sy + 2, sw - 4, sh - 4, radius - 2, sStepX, sStepY > 0 ? sStepY - 4 : 0);
-    g.clip();
-    const topSheen = g.createLinearGradient(sx, sy, sx, sy + sh * 0.55);
-    topSheen.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
-    topSheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    g.fillStyle = topSheen;
-    g.fillRect(sx, sy, sw, sh * 0.5);
-    g.restore();
+    // Subtle soft reflection across the top-left of the sticker
+    if (sheen > 0.01) {
+      g.save();
+      traceKeyShape(g, sx, sy, sw, sh, radius, sStepX, sStepY);
+      g.clip();
+      const glossGrad = g.createLinearGradient(sx, sy, sx + sw * 0.6, sy + sh * 0.6);
+      glossGrad.addColorStop(0, `rgba(255, 255, 255, ${(0.12 * sheen).toFixed(3)})`);
+      glossGrad.addColorStop(0.35, `rgba(255, 255, 255, ${(0.035 * sheen).toFixed(3)})`);
+      glossGrad.addColorStop(0.55, 'rgba(255, 255, 255, 0)');
+      g.fillStyle = glossGrad;
+      g.fillRect(sx, sy, sw, sh);
+      g.restore();
+    }
 
     // Optional label on sticker (off by default: blind typing uses blank colored stickers!)
     if (!blank) {
-      g.fillStyle = '#ffffff';
-      g.shadowColor = 'rgba(0, 0, 0, 0.35)';
-      g.shadowBlur = 4;
-      if (k.spyIcon || k.id === 'win') {
-        const logoW = Math.min(sw * 0.42, (sh * 0.50) / KEY_LOGO_ASPECT);
-        const logoH = logoW * KEY_LOGO_ASPECT;
-        drawLogo(g, sx + (sStepX + sw) / 2 - logoW / 2, sy + (sh - logoH) / 2, logoW, '#ffffff', logoH);
-      } else {
-        g.textAlign = 'center';
-        g.textBaseline = 'middle';
-        const isWord = k.label.length > 2;
-        g.font = isWord ? '700 18px "Outfit", sans-serif' : '800 28px "Outfit", sans-serif';
-        g.fillText(k.label, sx + (sStepX + sw) / 2, sy + sh / 2);
-      }
-      g.shadowBlur = 0;
-    }
-
-    // Tactile homing bump embossed on sticker for F and J
-    if (k.homing) {
-      g.fillStyle = 'rgba(255, 255, 255, 0.55)';
-      g.beginPath();
-      g.roundRect(sx + sw / 2 - 9, sy + sh - 9, 18, 2.8, 1.5);
-      g.fill();
+      drawKeyTypography(k, sx, sy, sw, sh, sStepX, sStepY, '#ffffff');
     }
 
     // Diagonal glossy shine sweep after the sticker seals
-    if (shineProgress > 0 && shineProgress < 1) {
+    if (useShine && shineProgress > 0 && shineProgress < 1) {
       g.save();
       traceKeyShape(g, sx, sy, sw, sh, radius, sStepX, sStepY);
       g.clip();
@@ -374,7 +339,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       const sweepX = lerp(sx - bandW - skew, sx + sw + bandW + skew, easeInOutCubic(shineProgress));
       const shineGrad = g.createLinearGradient(sweepX - bandW, sy, sweepX + bandW, sy + sh * 0.4);
       shineGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-      shineGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.68)');
+      shineGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.38)');
       shineGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
       g.fillStyle = shineGrad;
       g.beginPath();
@@ -504,7 +469,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
   }
 
   // Pre-render static layers once so per-frame draw(t) only renders the active key + sticker
-  const activeColor = opts.fingerColors[targetKey.finger] || '#3b82f6';
+  const activeColor = opts.fingerColors[targetKey.finger] || '#456d74';
   let bgCache = null, boardCache = null, hudCache = null;
 
   function ensureCaches() {
@@ -527,10 +492,10 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       g.fillStyle = opts.greenscreenColor || '#00ff00';
       g.fillRect(0, 0, W, H);
     } else if (opts.bgMode === 'custom') {
-      g.fillStyle = opts.bgColor || '#0f172a';
+      g.fillStyle = opts.bgColor || '#484848';
       g.fillRect(0, 0, W, H);
     } else if (opts.bgMode === 'image') {
-      g.fillStyle = opts.bgColor || '#0a0f1d';
+      g.fillStyle = opts.bgColor || '#484848';
       g.fillRect(0, 0, W, H);
       if (bgImage && drawCoverImage(g, bgImage, 0, 0, W, H)) {
         if (opts.bgImageDim > 0) {
@@ -552,10 +517,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
             vg.fillRect(0, 0, W, H);
           }
         } else {
-          const bgGrad = vg.createRadialGradient(W / 2, H * 0.5, 80, W / 2, H * 0.5, W * 0.55);
-          bgGrad.addColorStop(0, mixHex(activeColor, theme.bg2, 0.55));
-          bgGrad.addColorStop(1, theme.bg1);
-          vg.fillStyle = bgGrad;
+          vg.fillStyle = theme.bg1 || '#484848';
           vg.fillRect(0, 0, W, H);
         }
         // Apply feathered oval mask around the keyboard
@@ -574,8 +536,12 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
         vg.restore();
         g.drawImage(vigCanvas, 0, 0);
       }
+    } else if (theme.bg1 === theme.bg2) {
+      // Exact 1-on-1 flat background matching the reference screenshot (#484848)
+      g.fillStyle = theme.bg1;
+      g.fillRect(0, 0, W, H);
     } else {
-      // Default 'theme' Studio background + ambient finger glow
+      // Gradient studio themes ('light', 'cyber')
       const bgGrad = g.createRadialGradient(W / 2, H * 0.48, 80, W / 2, H * 0.5, W * 0.65);
       bgGrad.addColorStop(0, theme.bg2);
       bgGrad.addColorStop(1, theme.bg1);
@@ -605,20 +571,21 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
         plateFill = '#f1f5f9';
         plateBorder = '#cbd5e1';
       } else if (effectiveBoardMode === 'custom') {
-        plateFill = opts.boardColor || '#0d1324';
-        plateBorder = mixHex(plateFill, '#ffffff', 0.22);
+        plateFill = opts.boardColor || '#484848';
+        plateBorder = mixHex(plateFill, '#000000', 0.18);
       }
 
+      const outerR = boardRect.outerRadius || 41.25;
+      const bw = boardRect.borderWidth || 18.75;
+
       g.fillStyle = plateFill;
-      g.strokeStyle = plateBorder;
-      g.lineWidth = 3;
-      if (!isChromaOrCutout) {
+      if (!isChromaOrCutout && theme.boardShadow && theme.boardShadow !== 'rgba(0, 0, 0, 0)') {
         g.shadowColor = theme.boardShadow;
         g.shadowBlur = 48;
         g.shadowOffsetY = 18;
       }
       g.beginPath();
-      g.roundRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h, 28);
+      g.roundRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h, outerR);
       g.fill();
       g.shadowBlur = 0;
       g.shadowOffsetY = 0;
@@ -626,7 +593,7 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       if (effectiveBoardMode === 'image') {
         g.save();
         g.beginPath();
-        g.roundRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h, 28);
+        g.roundRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h, outerR);
         g.clip();
         if (bgImage && drawCoverImage(g, bgImage, boardRect.x, boardRect.y, boardRect.w, boardRect.h)) {
           if (opts.bgImageDim > 0) {
@@ -634,9 +601,8 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
             g.fillRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h);
           }
         } else {
-          // Stylish masked gradient fallback when no image is uploaded yet
           const fallbackGrad = g.createLinearGradient(boardRect.x, boardRect.y, boardRect.x + boardRect.w, boardRect.y + boardRect.h);
-          fallbackGrad.addColorStop(0, mixHex(activeColor, '#0f172a', 0.55));
+          fallbackGrad.addColorStop(0, mixHex(activeColor, '#353535', 0.55));
           fallbackGrad.addColorStop(1, opts.boardColor || theme.boardBg);
           g.fillStyle = fallbackGrad;
           g.fillRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h);
@@ -644,19 +610,26 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
         g.restore();
       }
 
+      // Thick rounded frame border inset inside boardRect (10px at 1024x576 -> 18.75px at 1920x1080)
+      g.strokeStyle = plateBorder;
+      g.lineWidth = bw;
       g.beginPath();
-      g.roundRect(boardRect.x, boardRect.y, boardRect.w, boardRect.h, 28);
+      g.roundRect(
+        boardRect.x + bw / 2,
+        boardRect.y + bw / 2,
+        boardRect.w - bw,
+        boardRect.h - bw,
+        Math.max(4, outerR - bw / 2)
+      );
       g.stroke();
       g.restore();
     }
 
     for (const k of keys) {
       if (k.id === targetKey.id) continue;
-      const sameLane = opts.showLaneGuide && k.finger === targetKey.finger;
-      const laneGlow = sameLane ? 0.22 : 0;
-      const topRect = drawKeycapBase(k, 0, laneGlow, activeColor);
+      const kColor = opts.fingerColors[k.finger] || '#456d74';
+      const topRect = drawKeycapBase(k, 0, 0, kColor, { laneColored: isKeyLaneColored(k) });
       if (preSet.has(k.id)) {
-        const kColor = opts.fingerColors[k.finger] || '#3b82f6';
         drawStickerSurface(k, topRect, kColor, { style: 'peel', progress: 1, blank: opts.blankSticker });
       }
     }
@@ -702,12 +675,12 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
     g.drawImage(boardCache, 0, 0);
 
     // 4. Target key animation state
-    let highlightAlpha = opts.showLaneGuide ? 0.22 : 0;
+    let highlightAlpha = 0;
     if (t >= schedule.focusStart && t < schedule.peelEnd) {
       const pulse = 0.75 + 0.25 * Math.sin((t - schedule.focusStart) * 10);
-      highlightAlpha = Math.max(highlightAlpha, clamp01((t - schedule.focusStart) / 0.25) * pulse);
-    } else if (t >= schedule.peelEnd) {
-      highlightAlpha = 0.65;
+      highlightAlpha = clamp01((t - schedule.focusStart) / 0.25) * pulse;
+    } else if (t >= schedule.peelEnd && t < schedule.shineEnd) {
+      highlightAlpha = (1 - clamp01((t - schedule.peelEnd) / Math.max(0.1, schedule.shineEnd - schedule.peelEnd))) * 0.5;
     }
 
     // Physical key depression when sticker seals at pressPeak
@@ -717,7 +690,9 @@ export function createKeyboardScene(canvas, targetKeyId, options = {}, { preStic
       pressY = Math.sin(clamp01(dp) * Math.PI) * 6.5;
     }
 
-    const targetTopRect = drawKeycapBase(targetKey, pressY, highlightAlpha, activeColor);
+    const targetTopRect = drawKeycapBase(targetKey, pressY, highlightAlpha, activeColor, {
+      laneColored: isKeyLaneColored(targetKey),
+    });
 
     // Sticker progress (0 -> 1)
     let stickerProgress = 0;

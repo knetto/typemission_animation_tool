@@ -671,6 +671,7 @@ export async function mount(root, { id, project, exportingView = false }) {
     const selSet = new Set(opts.selectedKeys);
     const flat = getFlatKeys(opts.layout);
     kbSelectionSummary.textContent = `${opts.selectedKeys.length} van ${flat.length} toetsen geselecteerd voor export`;
+    kbGridWrap.classList.toggle('no-shine', opts.stickerShine === false);
 
     kbGridWrap.replaceChildren(
       ...layoutObj.rows.map((row, rIdx) => {
@@ -679,11 +680,13 @@ export async function mount(root, { id, project, exportingView = false }) {
           ...row.map((key) => {
             const isSelected = selSet.has(key.id);
             const isPreview = opts.previewKey === key.id;
-            const col = opts.fingerColors[key.finger] || '#3b82f6';
+            const isModifier = key.kind === 'special' && key.id !== 'space';
+            const col = opts.fingerColors[key.finger] || '#456d74';
             const fInfo = FINGERS.find((f) => f.id === key.finger) || FINGERS[0];
+            const displayLabel = key.canvasLabel !== undefined ? key.canvasLabel : (key.blankKey ? '' : key.label);
             return h('button', {
               type: 'button',
-              class: `kb-key${isSelected ? ' selected' : ''}${isPreview ? ' previewing' : ''}${key.homing ? ' homing' : ''}${key.isoEnter ? ' iso-enter' : ''}`,
+              class: `kb-key${isSelected ? ' selected' : ''}${isPreview ? ' previewing' : ''}${isModifier ? ' modifier' : ''}${key.homing ? ' homing' : ''}${key.isoEnter ? ' iso-enter' : ''}`,
               'data-key-id': key.id,
               'aria-pressed': String(isSelected),
               title: `${key.label}${key.sub ? ' / ' + key.sub : ''} (${fInfo.name}) — Klik om te selecteren · Rechtermuisklik voor afspelen & opties`,
@@ -695,19 +698,18 @@ export async function mount(root, { id, project, exportingView = false }) {
               ? h('span', {
                   class: 'kb-iso-shape',
                   'aria-hidden': 'true',
-                  html: `<svg viewBox="0 0 60 81" preserveAspectRatio="none"><path d="M8,1 H52 A7,7 0 0 1 59,8 V73 A7,7 0 0 1 52,80 H18.5 A7,7 0 0 1 11.5,73 V42 A4,4 0 0 0 7.5,38 H7 A6,6 0 0 1 1,32 V8 A7,7 0 0 1 8,1 Z"/></svg>`,
+                  html: `<svg viewBox="0 0 60 81" preserveAspectRatio="none"><path d="M6,0 H54 A6,6 0 0 1 60,6 V75 A6,6 0 0 1 54,81 H26 A6,6 0 0 1 20,75 V38 H6 A6,6 0 0 1 0,32 V6 A6,6 0 0 1 6,0 Z"/></svg>`,
                 })
               : null,
-            key.sub ? h('small', { class: 'kb-key-sub' }, key.sub) : null,
-            key.spyIcon || key.id === 'win'
+            key.spyIcon
               ? h('span', { class: 'kb-key-main kb-key-spy-logo', 'aria-label': 'Spy', html: logoSvg('currentColor') })
-              : h('span', { class: 'kb-key-main' }, key.label),
+              : h('span', { class: 'kb-key-main' }, displayLabel),
             isSelected ? h('span', { class: 'kb-key-check', 'aria-hidden': 'true' }, '✓') : null);
           }),
           prevRowIso
             ? h('div', {
                 class: 'kb-iso-spacer',
-                style: { '--kw': prevRowIso.wBottom || 1.25 },
+                style: { '--kw': prevRowIso.wBottom || 1 },
                 'aria-hidden': 'true',
               })
             : null
@@ -1337,6 +1339,7 @@ export async function mount(root, { id, project, exportingView = false }) {
       ),
       toggleControl('Lege gekleurde sticker (bedekt letter)', 'blankSticker', 'kb-blank-sticker'),
       h('p', { class: 'hint' }, 'Standaard voor blind typen: de gekleurde sticker plakt over de letter heen zodat de toets leeg is.'),
+      toggleControl('Subtiele glans op stickers (Shine)', 'stickerShine', 'kb-sticker-shine'),
       toggleControl('Camera-inzoomen op actieve toets', 'cameraZoom', 'kb-camera-zoom'),
       toggleControl('Toon vingerbanen op toetsen', 'showLaneGuide', 'kb-lane-guide'),
       toggleControl('Toon toets- & vinger-badge bovenin', 'showKeyBadge', 'kb-key-badge'),

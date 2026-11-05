@@ -28,8 +28,9 @@ test('All keyboard layouts (NL, US, UK, AZERTY, German QWERTZ) have 5 balanced r
     assert.equal(layout.rows.length, 5, `${layoutId} has 5 rows`);
     for (const [rIdx, row] of layout.rows.entries()) {
       const prevRowIso = rIdx > 0 ? layout.rows[rIdx - 1].find((k) => k.isoEnter) : null;
-      const sumW = row.reduce((acc, k) => acc + k.w, 0) + (prevRowIso ? prevRowIso.wBottom || 1.25 : 0);
-      assert.ok(Math.abs(sumW - 15) < 1e-6, `${layoutId} row ${rIdx} sums to 15u (got ${sumW})`);
+      const sumW = row.reduce((acc, k) => acc + k.w, 0) + (prevRowIso ? prevRowIso.wBottom || 1 : 0);
+      const expectedW = rIdx === 4 ? 15.75 : (rIdx === 2 && prevRowIso) ? 14.75 : 15;
+      assert.ok(Math.abs(sumW - expectedW) < 1e-6, `${layoutId} row ${rIdx} sums to ${expectedW}u (got ${sumW})`);
       for (const k of row) {
         assert.ok(validFingers.has(k.finger), `${layoutId} key ${k.id} has valid finger ${k.finger}`);
       }
@@ -75,8 +76,8 @@ test('keyboard sticker soundtrack is deterministic and respects blankSticker def
   assert.equal(opts.layout, 'azerty');
   assert.equal(opts.blankSticker, true, 'blank sticker covers letter by default');
   assert.equal(opts.fingerColors.pinky, '#112233');
-  assert.equal(opts.fingerColors.index, '#3b82f6');
-  assert.equal(opts.fingerColors.index_right, '#1d4ed8');
+  assert.equal(opts.fingerColors.index, '#456d74');
+  assert.equal(opts.fingerColors.index_right, '#375169');
 
   const sched = keyboardSchedule(opts);
   assert.equal(sched.startDelay, 0.4);

@@ -2,18 +2,28 @@
 // 5 finger-lane colors (pinky, ring, middle, index, thumb), deterministic schedule & satisfying sound synthesis.
 
 export const FINGERS = [
-  { id: 'pinky', name: 'Pink', shortName: 'Pink', desc: 'Linker & rechter pink', defaultColor: '#f43f5e' },
-  { id: 'ring', name: 'Ringvinger', shortName: 'Ringvinger', desc: 'Linker & rechter ringvinger', defaultColor: '#f59e0b' },
-  { id: 'middle', name: 'Middelvinger', shortName: 'Middelvinger', desc: 'Linker & rechter middelvinger', defaultColor: '#10b981' },
-  { id: 'index', name: 'Wijsvinger Links', shortName: 'Wijsvinger L', desc: 'Linker wijsvinger', defaultColor: '#3b82f6' },
-  { id: 'index_right', name: 'Wijsvinger Rechts', shortName: 'Wijsvinger R', desc: 'Rechter wijsvinger', defaultColor: '#1d4ed8' },
-  { id: 'thumb', name: 'Duim', shortName: 'Duim', desc: 'Spatiebalk & duimtoetsen', defaultColor: '#8b5cf6' },
+  { id: 'pinky', name: 'Pink', shortName: 'Pink', desc: 'Linker & rechter pink', defaultColor: '#745c39' },
+  { id: 'ring', name: 'Ringvinger', shortName: 'Ringvinger', desc: 'Linker & rechter ringvinger', defaultColor: '#506b43' },
+  { id: 'middle', name: 'Middelvinger', shortName: 'Middelvinger', desc: 'Linker & rechter middelvinger', defaultColor: '#693d44' },
+  { id: 'index', name: 'Wijsvinger Links', shortName: 'Wijsvinger L', desc: 'Linker wijsvinger', defaultColor: '#456d74' },
+  { id: 'index_right', name: 'Wijsvinger Rechts', shortName: 'Wijsvinger R', desc: 'Rechter wijsvinger', defaultColor: '#375169' },
+  { id: 'thumb', name: 'Duim', shortName: 'Duim', desc: 'Spatiebalk & duimtoetsen', defaultColor: '#725575' },
 ];
 
 export const DEFAULT_FINGER_COLORS = Object.fromEntries(FINGERS.map((f) => [f.id, f.defaultColor]));
 
+const LEGACY_VIBRANT_COLORS = {
+  pinky: '#f43f5e',
+  ring: '#f59e0b',
+  middle: '#10b981',
+  index: '#3b82f6',
+  index_right: '#1d4ed8',
+  thumb: '#8b5cf6',
+};
+
 export const COLOR_PALETTES = {
-  vibrant: { name: 'Spy Neon (Standaard)', colors: { pinky: '#f43f5e', ring: '#f59e0b', middle: '#10b981', index: '#3b82f6', index_right: '#1d4ed8', thumb: '#8b5cf6' } },
+  reference: { name: 'Standaard (1-op-1)', colors: { pinky: '#745c39', ring: '#506b43', middle: '#693d44', index: '#456d74', index_right: '#375169', thumb: '#725575' } },
+  vibrant: { name: 'Spy Neon', colors: { pinky: '#f43f5e', ring: '#f59e0b', middle: '#10b981', index: '#3b82f6', index_right: '#1d4ed8', thumb: '#8b5cf6' } },
   classic: { name: 'Typcursus Klassiek', colors: { pinky: '#ef4444', ring: '#f97316', middle: '#eab308', index: '#22c55e', index_right: '#15803d', thumb: '#06b6d4' } },
   pastel: { name: 'Soft Pastel', colors: { pinky: '#fb7185', ring: '#fdba74', middle: '#6ee7b7', index: '#93c5fd', index_right: '#3b82f6', thumb: '#c4b5fd' } },
   cyber: { name: 'Cyber Agent', colors: { pinky: '#ec4899', ring: '#a855f7', middle: '#06b6d4', index: '#3b82f6', index_right: '#1d4ed8', thumb: '#10b981' } },
@@ -21,18 +31,35 @@ export const COLOR_PALETTES = {
 
 export const KEYBOARD_THEMES = {
   dark: {
-    name: 'Studio Donker',
-    bg1: '#0a0f1d',
-    bg2: '#141e38',
-    boardBg: '#0d1324',
-    boardBorder: '#2a395c',
-    boardShadow: 'rgba(0, 0, 0, 0.78)',
-    keySide: '#151f38',
-    keyTop: '#1e2b4a',
-    keyBorder: '#334774',
-    keyText: '#eef4ff',
-    keySub: '#7f95c2',
-    accent: '#4f8cff',
+    name: 'Standaard Grijs (1-op-1)',
+    bg1: '#484848',
+    bg2: '#484848',
+    boardBg: '#484848',
+    boardBorder: '#3a3a3a',
+    boardShadow: 'rgba(0, 0, 0, 0)',
+    keySide: '#353535',
+    keyTop: '#353535',
+    keySpecial: '#363636',
+    keyBorder: '#353535',
+    keyText: '#ffffff',
+    keySub: '#ffffff',
+    accent: '#456d74',
+  },
+  all_colored: {
+    name: 'Alle Vingerkleuren Zichtbaar',
+    bg1: '#484848',
+    bg2: '#484848',
+    boardBg: '#484848',
+    boardBorder: '#3a3a3a',
+    boardShadow: 'rgba(0, 0, 0, 0)',
+    keySide: '#353535',
+    keyTop: '#353535',
+    keySpecial: '#363636',
+    keyBorder: '#353535',
+    keyText: '#ffffff',
+    keySub: '#ffffff',
+    accent: '#456d74',
+    allLanesColored: true,
   },
   spy: {
     name: 'Spy Terminal',
@@ -43,6 +70,7 @@ export const KEYBOARD_THEMES = {
     boardShadow: 'rgba(0, 8, 24, 0.85)',
     keySide: '#08234d',
     keyTop: '#0d3169',
+    keySpecial: '#0b2959',
     keyBorder: '#3b8fe0',
     keyText: '#dbf0ff',
     keySub: '#75b4f0',
@@ -57,6 +85,7 @@ export const KEYBOARD_THEMES = {
     boardShadow: 'rgba(5, 10, 24, 0.65)',
     keySide: '#b8c4d9',
     keyTop: '#f5f8ff',
+    keySpecial: '#e6eefb',
     keyBorder: '#c5d1e6',
     keyText: '#1b263b',
     keySub: '#64748b',
@@ -71,7 +100,7 @@ export const STICKER_STYLES = {
 };
 
 export const BACKGROUND_MODES = {
-  theme: { name: 'Studio Gloed', desc: 'Standaard achtergrond met vingerkleur-gloed' },
+  theme: { name: 'Standaard (#484848)', desc: 'Vlakke donkergrijze achtergrond zoals het voorbeeld' },
   black: { name: 'Zwart', desc: 'Puur zwart (#000000)' },
   white: { name: 'Wit', desc: 'Puur wit (#FFFFFF)' },
   greenscreen: { name: 'Greenscreen', desc: 'Chroma-key groen (#00FF00) zonder schaduw-waas' },
@@ -97,12 +126,14 @@ export const MASK_MODES = {
 };
 
 // Helper to create a key definition (splits index finger into left 'index' and right 'index_right')
-const k = (id, label, { sub = '', w = 1, wBottom = 0, isoEnter = false, spyIcon = false, finger = 'pinky', hand = 'left', kind = 'letter', homing = false } = {}) => ({
+const k = (id, label, { sub = '', canvasLabel, blankKey = false, w = 1, wBottom = 0, isoEnter = false, spyIcon = false, finger = 'pinky', hand = 'left', kind = 'letter', homing = false } = {}) => ({
   id,
   label,
+  canvasLabel: canvasLabel !== undefined ? canvasLabel : (blankKey ? '' : label),
+  blankKey,
   sub,
   w,
-  wBottom: isoEnter ? (wBottom || 1.25) : 0,
+  wBottom: isoEnter ? (wBottom || 1) : 0,
   isoEnter,
   spyIcon,
   finger: finger === 'index' && hand === 'right' ? 'index_right' : finger,
@@ -131,7 +162,7 @@ export const KEYBOARD_LAYOUTS = {
         k('0', '0', { sub: "'", finger: 'pinky', hand: 'right', kind: 'number' }),
         k('slash', '/', { sub: '?', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('degree', '°', { sub: '~', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('backspace', '⌫', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('backspace', 'Backspace', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('tab', 'Tab', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -147,10 +178,10 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('diaeresis', '¨', { sub: '^', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('asterisk', '*', { sub: '|', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('enter', 'Enter', { w: 1.5, wBottom: 1, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('caps', 'CapsLock', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('a', 'A', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('s', 'S', { finger: 'ring', hand: 'left', kind: 'letter' }),
         k('d', 'D', { finger: 'middle', hand: 'left', kind: 'letter' }),
@@ -165,7 +196,7 @@ export const KEYBOARD_LAYOUTS = {
         k('angle', '<', { sub: '>', finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
-        k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lshift', 'Shift', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('bracket', ']', { sub: '[', finger: 'pinky', hand: 'left', kind: 'symbol' }),
         k('z', 'Z', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('x', 'X', { finger: 'ring', hand: 'left', kind: 'letter' }),
@@ -177,16 +208,17 @@ export const KEYBOARD_LAYOUTS = {
         k('comma', ',', { sub: ';', finger: 'middle', hand: 'right', kind: 'symbol' }),
         k('period', '.', { sub: ':', finger: 'ring', hand: 'right', kind: 'symbol' }),
         k('minus', '-', { sub: '=', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('rshift', 'Shift ⇧', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rshift', 'Shift', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
-        k('space', 'Spatie', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
-        k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
-        k('fn', 'Fn', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
-        k('rctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('lctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Win', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lalt', 'Alt', { w: 1.25, finger: 'thumb', hand: 'left', kind: 'special' }),
+        k('space', 'Spatie', { blankKey: true, w: 7, finger: 'thumb', hand: 'both', kind: 'special' }),
+        k('ralt', 'Alt Gr', { w: 1.25, finger: 'thumb', hand: 'right', kind: 'special' }),
+        k('rwin', 'Win R', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('fn', 'Fn', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
     ],
   },
@@ -210,7 +242,7 @@ export const KEYBOARD_LAYOUTS = {
         k('0', '0', { sub: ')', finger: 'pinky', hand: 'right', kind: 'number' }),
         k('minus', '-', { sub: '_', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('equal', '=', { sub: '+', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('backspace', '⌫', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('backspace', 'Backspace', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('tab', 'Tab', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -229,7 +261,7 @@ export const KEYBOARD_LAYOUTS = {
         k('backslash', '\\', { sub: '|', w: 1.5, finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
-        k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('caps', 'CapsLock', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('a', 'A', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('s', 'S', { finger: 'ring', hand: 'left', kind: 'letter' }),
         k('d', 'D', { finger: 'middle', hand: 'left', kind: 'letter' }),
@@ -241,10 +273,10 @@ export const KEYBOARD_LAYOUTS = {
         k('l', 'L', { finger: 'ring', hand: 'right', kind: 'letter' }),
         k('semicolon', ';', { sub: ':', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('quote', "'", { sub: '"', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 2.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('enter', 'Enter', { w: 2.25, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('lshift', 'Shift ⇧', { w: 2.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lshift', 'Shift', { w: 2.25, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('z', 'Z', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('x', 'X', { finger: 'ring', hand: 'left', kind: 'letter' }),
         k('c', 'C', { finger: 'middle', hand: 'left', kind: 'letter' }),
@@ -255,16 +287,17 @@ export const KEYBOARD_LAYOUTS = {
         k('comma', ',', { sub: '<', finger: 'middle', hand: 'right', kind: 'symbol' }),
         k('period', '.', { sub: '>', finger: 'ring', hand: 'right', kind: 'symbol' }),
         k('slash', '/', { sub: '?', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('rshift', 'Shift ⇧', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rshift', 'Shift', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
-        k('space', 'Space', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
-        k('ralt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
-        k('fn', 'Fn', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
-        k('rctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('lctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Win', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lalt', 'Alt', { w: 1.25, finger: 'thumb', hand: 'left', kind: 'special' }),
+        k('space', 'Space', { blankKey: true, w: 7, finger: 'thumb', hand: 'both', kind: 'special' }),
+        k('ralt', 'Alt', { w: 1.25, finger: 'thumb', hand: 'right', kind: 'special' }),
+        k('rwin', 'Win R', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('fn', 'Fn', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
     ],
   },
@@ -288,7 +321,7 @@ export const KEYBOARD_LAYOUTS = {
         k('0', '0', { sub: ')', finger: 'pinky', hand: 'right', kind: 'number' }),
         k('minus', '-', { sub: '_', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('equal', '=', { sub: '+', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('backspace', '⌫', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('backspace', 'Backspace', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('tab', 'Tab', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -304,10 +337,10 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('lbracket', '[', { sub: '{', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('rbracket', ']', { sub: '}', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('enter', 'Enter', { w: 1.5, wBottom: 1, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('caps', 'CapsLock', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('a', 'A', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('s', 'S', { finger: 'ring', hand: 'left', kind: 'letter' }),
         k('d', 'D', { finger: 'middle', hand: 'left', kind: 'letter' }),
@@ -322,7 +355,7 @@ export const KEYBOARD_LAYOUTS = {
         k('hash', '#', { sub: '~', finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
-        k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lshift', 'Shift', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('backslash', '\\', { sub: '|', finger: 'pinky', hand: 'left', kind: 'symbol' }),
         k('z', 'Z', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('x', 'X', { finger: 'ring', hand: 'left', kind: 'letter' }),
@@ -334,16 +367,17 @@ export const KEYBOARD_LAYOUTS = {
         k('comma', ',', { sub: '<', finger: 'middle', hand: 'right', kind: 'symbol' }),
         k('period', '.', { sub: '>', finger: 'ring', hand: 'right', kind: 'symbol' }),
         k('slash', '/', { sub: '?', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('rshift', 'Shift ⇧', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rshift', 'Shift', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
-        k('space', 'Space', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
-        k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
-        k('fn', 'Fn', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
-        k('rctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('lctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Win', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lalt', 'Alt', { w: 1.25, finger: 'thumb', hand: 'left', kind: 'special' }),
+        k('space', 'Space', { blankKey: true, w: 7, finger: 'thumb', hand: 'both', kind: 'special' }),
+        k('ralt', 'Alt Gr', { w: 1.25, finger: 'thumb', hand: 'right', kind: 'special' }),
+        k('rwin', 'Win R', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('fn', 'Fn', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
     ],
   },
@@ -367,7 +401,7 @@ export const KEYBOARD_LAYOUTS = {
         k('0', 'à', { sub: '0', finger: 'pinky', hand: 'right', kind: 'number' }),
         k('rparen', ')', { sub: '°', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('minus', '-', { sub: '_', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('backspace', '⌫', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('backspace', 'Backspace', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('tab', 'Tab', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -383,10 +417,10 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('circumflex', '^', { sub: '¨', finger: 'pinky', hand: 'right', kind: 'symbol' }),
         k('dollar', '$', { sub: '*', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('enter', 'Enter', { w: 1.5, wBottom: 1, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('caps', 'CapsLock', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('q', 'Q', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('s', 'S', { finger: 'ring', hand: 'left', kind: 'letter' }),
         k('d', 'D', { finger: 'middle', hand: 'left', kind: 'letter' }),
@@ -401,7 +435,7 @@ export const KEYBOARD_LAYOUTS = {
         k('mu', 'µ', { sub: '£', finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
-        k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lshift', 'Shift', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('angle', '<', { sub: '>', finger: 'pinky', hand: 'left', kind: 'symbol' }),
         k('w', 'W', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('x', 'X', { finger: 'ring', hand: 'left', kind: 'letter' }),
@@ -413,16 +447,17 @@ export const KEYBOARD_LAYOUTS = {
         k('semicolon', ';', { sub: '.', finger: 'middle', hand: 'right', kind: 'symbol' }),
         k('colon', ':', { sub: '/', finger: 'ring', hand: 'right', kind: 'symbol' }),
         k('equal', '=', { sub: '+', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('rshift', 'Shift ⇧', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rshift', 'Shift', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
-        k('space', 'Spatie', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
-        k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
-        k('fn', 'Fn', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
-        k('rctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('lctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Win', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lalt', 'Alt', { w: 1.25, finger: 'thumb', hand: 'left', kind: 'special' }),
+        k('space', 'Spatie', { blankKey: true, w: 7, finger: 'thumb', hand: 'both', kind: 'special' }),
+        k('ralt', 'Alt Gr', { w: 1.25, finger: 'thumb', hand: 'right', kind: 'special' }),
+        k('rwin', 'Win R', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('fn', 'Fn', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
     ],
   },
@@ -446,7 +481,7 @@ export const KEYBOARD_LAYOUTS = {
         k('0', '0', { sub: '=', finger: 'pinky', hand: 'right', kind: 'number' }),
         k('eszett', 'ß', { sub: '?', finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('acute', '´', { sub: '`', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('backspace', '⌫', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('backspace', 'Backspace', { w: 2, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
         k('tab', 'Tab', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
@@ -462,10 +497,10 @@ export const KEYBOARD_LAYOUTS = {
         k('p', 'P', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('uuml', 'Ü', { finger: 'pinky', hand: 'right', kind: 'letter' }),
         k('plus', '+', { sub: '*', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('enter', 'Enter ↵', { w: 1.5, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('enter', 'Enter', { w: 1.5, wBottom: 1, isoEnter: true, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('caps', 'Caps', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('caps', 'CapsLock', { w: 1.75, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('a', 'A', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('s', 'S', { finger: 'ring', hand: 'left', kind: 'letter' }),
         k('d', 'D', { finger: 'middle', hand: 'left', kind: 'letter' }),
@@ -480,7 +515,7 @@ export const KEYBOARD_LAYOUTS = {
         k('hash', '#', { sub: "'", finger: 'pinky', hand: 'right', kind: 'symbol' }),
       ],
       [
-        k('lshift', 'Shift ⇧', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lshift', 'Shift', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
         k('angle', '<', { sub: '>', finger: 'pinky', hand: 'left', kind: 'symbol' }),
         k('y', 'Y', { finger: 'pinky', hand: 'left', kind: 'letter' }),
         k('x', 'X', { finger: 'ring', hand: 'left', kind: 'letter' }),
@@ -492,16 +527,17 @@ export const KEYBOARD_LAYOUTS = {
         k('comma', ',', { sub: ';', finger: 'middle', hand: 'right', kind: 'symbol' }),
         k('period', '.', { sub: ':', finger: 'ring', hand: 'right', kind: 'symbol' }),
         k('minus', '-', { sub: '_', finger: 'pinky', hand: 'right', kind: 'symbol' }),
-        k('rshift', 'Shift ⇧', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rshift', 'Shift', { w: 2.75, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
       [
-        k('lctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('win', 'Spy', { w: 1.25, spyIcon: true, finger: 'pinky', hand: 'left', kind: 'special' }),
-        k('lalt', 'Alt', { w: 1.5, finger: 'thumb', hand: 'left', kind: 'special' }),
-        k('space', 'Spatie', { w: 6.5, finger: 'thumb', hand: 'both', kind: 'special' }),
-        k('ralt', 'AltGr', { w: 1.5, finger: 'thumb', hand: 'right', kind: 'special' }),
-        k('fn', 'Fn', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
-        k('rctrl', 'Ctrl', { w: 1.5, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('lctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('win', 'Win', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'left', kind: 'special' }),
+        k('lalt', 'Alt', { w: 1.25, finger: 'thumb', hand: 'left', kind: 'special' }),
+        k('space', 'Spatie', { blankKey: true, w: 7, finger: 'thumb', hand: 'both', kind: 'special' }),
+        k('ralt', 'Alt Gr', { w: 1.25, finger: 'thumb', hand: 'right', kind: 'special' }),
+        k('rwin', 'Win R', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('fn', 'Fn', { blankKey: true, w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
+        k('rctrl', 'Ctrl', { w: 1.25, finger: 'pinky', hand: 'right', kind: 'special' }),
       ],
     ],
   },
@@ -539,9 +575,14 @@ export function normalizeKeyboardOpts(opts = {}) {
   }
   const fingerColors = { ...DEFAULT_FINGER_COLORS };
   if (opts.fingerColors && typeof opts.fingerColors === 'object') {
-    for (const f of FINGERS) {
-      if (typeof opts.fingerColors[f.id] === 'string' && /^#[0-9a-fA-F]{6}$/.test(opts.fingerColors[f.id])) {
-        fingerColors[f.id] = opts.fingerColors[f.id].toLowerCase();
+    const isAllLegacyVibrant = FINGERS.every(
+      (f) => typeof opts.fingerColors[f.id] === 'string' && opts.fingerColors[f.id].toLowerCase() === LEGACY_VIBRANT_COLORS[f.id]
+    );
+    if (!isAllLegacyVibrant) {
+      for (const f of FINGERS) {
+        if (typeof opts.fingerColors[f.id] === 'string' && /^#[0-9a-fA-F]{6}$/.test(opts.fingerColors[f.id])) {
+          fingerColors[f.id] = opts.fingerColors[f.id].toLowerCase();
+        }
       }
     }
   }
@@ -553,20 +594,24 @@ export function normalizeKeyboardOpts(opts = {}) {
     : (selectedKeys[0] || defaultSelectedKeys(layout)[0] || 'a');
 
   const bgMode = Object.prototype.hasOwnProperty.call(BACKGROUND_MODES, opts.bgMode) ? opts.bgMode : 'theme';
-  const bgColor = typeof opts.bgColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(opts.bgColor) ? opts.bgColor.toLowerCase() : '#0f172a';
+  const bgColor = typeof opts.bgColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(opts.bgColor) ? opts.bgColor.toLowerCase() : '#484848';
   const greenscreenColor = typeof opts.greenscreenColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(opts.greenscreenColor) ? opts.greenscreenColor.toLowerCase() : '#00ff00';
   const bgImageUrl = typeof opts.bgImageUrl === 'string' ? opts.bgImageUrl.trim() : '';
   const bgImageDim = Number.isFinite(opts.bgImageDim) ? Math.max(0, Math.min(0.9, Number(opts.bgImageDim))) : 0.25;
   const boardMode = Object.prototype.hasOwnProperty.call(BOARD_MODES, opts.boardMode) ? opts.boardMode : 'theme';
-  const boardColor = typeof opts.boardColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(opts.boardColor) ? opts.boardColor.toLowerCase() : '#0d1324';
+  const boardColor = typeof opts.boardColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(opts.boardColor) ? opts.boardColor.toLowerCase() : '#484848';
   const maskMode = Object.prototype.hasOwnProperty.call(MASK_MODES, opts.maskMode) ? opts.maskMode : 'board';
+  const hasV2 = opts.visualV2 === true;
+  const hasV3 = opts.visualV3 === true;
 
   return {
+    visualV2: true,
+    visualV3: true,
     layout,
     selectedKeys,
     previewKey,
     fingerColors,
-    theme: ['dark', 'spy', 'light'].includes(opts.theme) ? opts.theme : 'dark',
+    theme: Object.prototype.hasOwnProperty.call(KEYBOARD_THEMES, opts.theme) ? opts.theme : 'dark',
     bgMode,
     bgColor,
     greenscreenColor,
@@ -579,10 +624,11 @@ export function normalizeKeyboardOpts(opts = {}) {
     startDelay,
     endDelay,
     duration,
-    blankSticker: opts.blankSticker !== false,       // default true: lege gekleurde sticker bedekt letter
-    cameraZoom: opts.cameraZoom !== false,           // default true: subtiele zoom naar de toets
-    showLaneGuide: opts.showLaneGuide !== false,     // default true: subtiele vingerbaan-indicatie
-    showKeyBadge: opts.showKeyBadge !== false,       // default true: toon toets + vingerbaan info boven/onder
+    blankSticker: opts.blankSticker !== false,            // default true: lege gekleurde sticker bedekt letter
+    stickerShine: opts.stickerShine !== false,            // default true: subtiele glans op stickers
+    cameraZoom: opts.cameraZoom !== false,                // default true: subtiele zoom naar de toets
+    showLaneGuide: hasV3 ? opts.showLaneGuide === true : false, // default false: highlight niet de hele vingersectie
+    showKeyBadge: hasV2 ? opts.showKeyBadge === true : false, // default false: clean 1-op-1 canvas zonder badge bovenin
     cumulativeStickers: opts.cumulativeStickers === true, // default false: elke export toont 1 toets die geplakt wordt
     sounds: opts.sounds !== false,
     volume: Number.isFinite(opts.volume) ? Math.max(0, Math.min(1, Number(opts.volume))) : 0.75,

@@ -877,7 +877,7 @@ export async function mount(root, { tab = 'projects' } = {}) {
       thumb.classList.add('file-project-thumb');
     }
     if (p.type === 'keyboard') {
-      const sw = ['#f43f5e', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6'].map((c) => h('i', { style: { background: c } }));
+      const sw = ['#745c39', '#506b43', '#693d44', '#456d74', '#375169', '#725575'].map((c) => h('i', { style: { background: c } }));
       thumb.replaceChildren(icon('keyboard'), h('div', { class: 'kb-thumb-dots' }, ...sw), h('span', { class: 'file-project-label' }, '⌨ KEYBOARD STICKERS'));
       thumb.classList.add('keyboard-project-thumb');
     }
